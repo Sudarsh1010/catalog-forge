@@ -55,7 +55,6 @@ interface ColumnScan {
   /** Non-blank cells seen. */
   valueCount: number
   currencyCounts: Map<string, number>
-  sawAmbiguousDollar: boolean
   localeVotes: { de: number; en: number }
   quantityShaped: number
   headerPrice: boolean
@@ -173,7 +172,6 @@ function newColumnScan(header: string): ColumnScan {
     header,
     valueCount: 0,
     currencyCounts: new Map(),
-    sawAmbiguousDollar: false,
     localeVotes: { de: 0, en: 0 },
     quantityShaped: 0,
     headerPrice: PRICE_HEADER.test(header),
@@ -190,7 +188,6 @@ function scanCell(scan: ColumnScan, cell: string | number | boolean): void {
   for (const code of currency.currencies) {
     scan.currencyCounts.set(code, (scan.currencyCounts.get(code) ?? 0) + 1)
   }
-  if (currency.ambiguousSymbol) scan.sawAmbiguousDollar = true
 
   // The number part votes on the column's decimal convention whether or
   // not a currency token shared the cell (`1.299,00 €` proves de).

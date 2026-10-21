@@ -39,7 +39,7 @@ export interface RowCleanResult {
   flags: CleanedFlag[]
 }
 
-export function flag(
+function flag(
   ec: string | null,
   code: string,
   columnIndex: number,
