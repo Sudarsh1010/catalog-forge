@@ -26,6 +26,8 @@ export interface NumberScan {
   integerDigits: string
   /** Fraction digits as written (no separator). */
   fractionDigits: string
+  /** The single separator character the text used (`ambiguous`/`exact`). */
+  separator: "." | "," | null
 }
 
 const INVALID_SCAN: NumberScan = {
@@ -34,6 +36,7 @@ const INVALID_SCAN: NumberScan = {
   negative: false,
   integerDigits: "",
   fractionDigits: "",
+  separator: null,
 }
 
 /** Normalize supplier noise: NBSP/typographic spaces, unicode minus, trim. */
@@ -68,6 +71,7 @@ export function scanNumber(raw: string): NumberScan {
       negative,
       integerDigits: body,
       fractionDigits: "",
+      separator: null,
     }
   }
 
@@ -84,13 +88,16 @@ export function scanNumber(raw: string): NumberScan {
     // One separator occurrence: `[int][sep][frac]`.
     const [intPart, fracPart = ""] = parts
     if (fracPart.length === 3) {
-      // `1.299` / `1,234` — de grouping or en decimal (EC-038).
+      // `1.299` / `1,234` — grouping in one locale, decimal in the other
+      // (EC-038). Which character is the decimal separator is decided by
+      // the column vote, not here.
       return {
         kind: "ambiguous",
         locale: null,
         negative,
         integerDigits: intPart!,
         fractionDigits: fracPart,
+        separator: sep,
       }
     }
     return {
@@ -99,6 +106,7 @@ export function scanNumber(raw: string): NumberScan {
       negative,
       integerDigits: intPart!,
       fractionDigits: fracPart,
+      separator: sep,
     }
   }
   // Multiple separators of one kind: pure grouping (`1.234.567`, `1,234,567`).
@@ -112,6 +120,7 @@ export function scanNumber(raw: string): NumberScan {
     negative,
     integerDigits: parts.join(""),
     fractionDigits: "",
+    separator: null,
   }
 }
 
@@ -133,6 +142,7 @@ function splitProven(
     negative,
     integerDigits: intSide,
     fractionDigits: fracSide,
+    separator: decimal,
   }
 }
 
@@ -148,6 +158,10 @@ export interface ScaledInteger {
  * Resolve a scan against the column's voted locale. Ambiguous scans need the
  * vote; with no decidable vote they stay unresolved (EC-038: flag, never
  * guess). Pure integers are locale-irrelevant and always resolve.
+ *
+ * The vote decides which character is the decimal separator — de never
+ * groups with commas, en never groups with dots — so `1,234` reads as 1.234
+ * under a de vote and as 1234 under an en vote (`1.299` mirrors it).
  */
 export function resolveScaled(
   scan: NumberScan,
@@ -155,10 +169,15 @@ export function resolveScaled(
 ): ScaledInteger | null {
   if (scan.kind === "invalid") return null
   if (scan.kind === "ambiguous" && columnLocale === null) return null
-  const isDecimal =
-    scan.kind === "exact"
-      ? scan.fractionDigits.length > 0
-      : scan.kind === "ambiguous" && columnLocale === "en"
+  let isDecimal: boolean
+  if (scan.kind === "exact") {
+    isDecimal = scan.fractionDigits.length > 0
+  } else if (scan.kind === "ambiguous") {
+    const decimalSeparator = columnLocale === "de" ? "," : "."
+    isDecimal = scan.separator === decimalSeparator
+  } else {
+    isDecimal = false
+  }
   return {
     negative: scan.negative,
     digits: scan.integerDigits + scan.fractionDigits,

@@ -189,6 +189,16 @@ function cleanPrice(text: string, plan: CleanColumnPlan): CellCleanResult {
     return { cell: { kind: "unparseable", value: text }, flags }
   }
   const valueCurrency = currency.currencies[0]
+  if (currency.ambiguousSymbol) {
+    flags.push(
+      flag(
+        "EC-040",
+        "price_currency_symbol_ambiguous",
+        plan.index,
+        `"${plan.header}": "$" could be USD, CAD or AUD — stored as USD.`
+      )
+    )
+  }
   if (valueCurrency && plan.currency && valueCurrency !== plan.currency) {
     flags.push(
       flag(

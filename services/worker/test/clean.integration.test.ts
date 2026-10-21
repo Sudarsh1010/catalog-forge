@@ -11,7 +11,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { sql } from "drizzle-orm"
 
 import type { Db } from "@workspace/db"
-import type { CleanColumnPlan } from "@workspace/db/schema"
+import type {
+  CleanColumnPlan,
+  CleanedCell,
+  CleanedFlag,
+  SheetCell,
+} from "@workspace/db/schema"
 
 import { planCleanStage } from "../src/clean/plan.js"
 import { createCleanHandler } from "../src/clean/handler.js"
@@ -244,5 +249,211 @@ describe("clean chunk handler (idempotent upserts, ADR-0003)", () => {
       FROM cleaned_rows WHERE import_id = ${imp.id}
     `)) as unknown as Array<{ n: number; distinct_n: number }>
     expect(counts[0]).toEqual({ n: 2, distinct_n: 2 })
+  })
+})
+
+describe("price normalization (EC-038/EC-039/EC-040)", () => {
+  /** Plan + run one chunk, return one row's cleaned values + flags. */
+  async function cleanOnce(
+    header: string[],
+    rows: SheetCell[][]
+  ): Promise<
+    Array<{ values: Array<CleanedCell | null>; flags: Array<CleanedFlag> }>
+  > {
+    const imp = await seedImport(db, {
+      status: "running",
+      stage: "clean",
+      sheetHeader: header,
+    })
+    await seedSheetRows(imp.id, rows)
+    await planCleanStage(db.db, { importId: imp.id, storeId: imp.storeId })
+    await runCleanWorker(imp.id)
+    const projection = await cleanedProjection(imp.id)
+    return projection as Array<{
+      values: Array<CleanedCell | null>
+      flags: Array<CleanedFlag>
+    }>
+  }
+
+  it("golden prices_de: every §5 format in one column with known-good parsed values", async () => {
+    const rows = await cleanOnce(
+      ["Preis"],
+      [
+        ["1.299,00 €"], // de thousands+decimals with symbol → 1299.00 EUR
+        ["2.480,50 €"], // de, keeps the symbol majority clearly EUR
+        ["1,299.00"], // en format, self-proven
+        ["12.5"], // one decimal digit → unambiguous en
+        ["£8"], // foreign symbol in a mostly-EUR column
+        [""], // blank → missing, no invention
+        [null], // absent → missing
+        ["1.299"], // ambiguous: resolved by the column vote (de majority)
+        ["12,5"], // unambiguous de
+        ["1.234.567,89"], // de grouping, self-proven
+        ["1 234 567,89"], // NBSP grouping (French typography), self-proven
+      ]
+    )
+    const values = rows.map((r) => r.values[0])
+    expect(values[0]).toEqual({ kind: "price", cents: 129900, currency: "EUR" })
+    expect(values[1]).toEqual({ kind: "price", cents: 248050, currency: "EUR" })
+    expect(values[2]).toEqual({ kind: "price", cents: 129900, currency: "EUR" })
+    expect(values[3]).toEqual({ kind: "price", cents: 1250, currency: "EUR" })
+    expect(values[4]).toEqual({ kind: "price", cents: 800, currency: "GBP" })
+    expect(values[5]).toBeNull()
+    expect(values[6]).toBeNull()
+    // Column vote: de proofs (rows 1, 2, 9) outnumber en proofs (rows 3, 4)
+    // → `1.299` reads as de grouping = 1299.00.
+    expect(values[7]).toEqual({ kind: "price", cents: 129900, currency: "EUR" })
+    expect(values[8]).toEqual({ kind: "price", cents: 1250, currency: "EUR" })
+    expect(values[9]).toEqual({
+      kind: "price",
+      cents: 123456789,
+      currency: "EUR",
+    })
+    expect(values[10]).toEqual({
+      kind: "price",
+      cents: 123456789,
+      currency: "EUR",
+    })
+    // EC-039: the en-format intruder parses by its own convention, flagged.
+    expect(rows[2]?.flags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ ec: "EC-039", code: "price_format_mixed" }),
+      ])
+    )
+    // EC-040: `£8` inside a mostly-EUR column is parsed as GBP but flagged.
+    expect(rows[4]?.flags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ ec: "EC-040", code: "price_currency_mixed" }),
+      ])
+    )
+    // Observing €/£ symbols means no currency assumption was made.
+    expect(rows[0]?.flags).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "price_currency_assumed" }),
+      ])
+    )
+  })
+
+  it("flags a locale-ambiguous column (EC-038) instead of guessing", async () => {
+    // 1 de vote vs 1 en vote — a tie decides nothing; `1.299`/`1,234` stay unparsed.
+    const rows = await cleanOnce(
+      ["Preis"],
+      [
+        ["1.299"],
+        ["1,234"],
+        ["12,5"], // de proof
+        ["12.5"], // en proof — tie
+      ]
+    )
+    expect(rows[0]?.values[0]).toEqual({ kind: "unparseable", value: "1.299" })
+    expect(rows[1]?.values[0]).toEqual({ kind: "unparseable", value: "1,234" })
+    expect(rows[0]?.flags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ec: "EC-038",
+          code: "price_locale_ambiguous",
+        }),
+      ])
+    )
+    // Self-proven values still parse regardless of the tie.
+    expect(rows[2]?.values[0]).toEqual({
+      kind: "price",
+      cents: 1250,
+      currency: "EUR",
+    })
+    expect(rows[3]?.values[0]).toEqual({
+      kind: "price",
+      cents: 1250,
+      currency: "EUR",
+    })
+  })
+
+  it("flags minority formats in a mixed column (EC-039) while parsing them by their own convention", async () => {
+    const rows = await cleanOnce(
+      ["Price (EUR)"],
+      [
+        ["1.299,00"],
+        ["2.480,50"],
+        ["3,5"], // de proof
+        ["4,5"], // de proof
+        ["1,299.00"], // en intruder (supplier merged two sources)
+      ]
+    )
+    // de majority wins the column; the en cell self-disambiguates and parses
+    // correctly but is flagged as a mixed-format row.
+    expect(rows[4]?.values[0]).toEqual({
+      kind: "price",
+      cents: 129900,
+      currency: "EUR",
+    })
+    expect(rows[4]?.flags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ ec: "EC-039", code: "price_format_mixed" }),
+      ])
+    )
+    expect(rows[0]?.flags).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "price_format_mixed" }),
+      ])
+    )
+  })
+
+  it("assumes the store currency when a column carries none and notes it (EC-040)", async () => {
+    const rows = await cleanOnce(["Preis"], [["129,90"], ["99"]])
+    expect(rows[0]?.values[0]).toEqual({
+      kind: "price",
+      cents: 12990,
+      currency: "EUR",
+    })
+    expect(rows[1]?.values[0]).toEqual({
+      kind: "price",
+      cents: 9900,
+      currency: "EUR",
+    })
+    expect(rows[0]?.flags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ec: "EC-040",
+          code: "price_currency_assumed",
+        }),
+      ])
+    )
+  })
+
+  it("flags a bare $ as an ambiguous currency symbol (EC-040)", async () => {
+    const rows = await cleanOnce(["Price"], [["$12.50"]])
+    expect(rows[0]?.values[0]).toEqual({
+      kind: "price",
+      cents: 1250,
+      currency: "USD",
+    })
+    expect(rows[0]?.flags).toEqual(
+      expect.arrayContaining([expect.objectContaining({ ec: "EC-040" })])
+    )
+  })
+
+  it("flags negative prices (EC-043) and rounds sub-cent thirds (EC-045)", async () => {
+    const rows = await cleanOnce(["Preis"], [["-5,00"], ["1,999"]])
+    expect(rows[0]?.values[0]).toEqual({
+      kind: "price",
+      cents: -500,
+      currency: "EUR",
+    })
+    expect(rows[0]?.flags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ ec: "EC-043", code: "price_negative" }),
+      ])
+    )
+    // 1,999 de = 1.999 → 199.9 cents → rounds half-up to 200 with a trail.
+    expect(rows[1]?.values[0]).toEqual({
+      kind: "price",
+      cents: 200,
+      currency: "EUR",
+    })
+    expect(rows[1]?.flags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ ec: "EC-045", code: "price_rounded" }),
+      ])
+    )
   })
 })
