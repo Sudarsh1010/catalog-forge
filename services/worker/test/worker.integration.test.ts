@@ -19,7 +19,6 @@ import {
   createTestDatabase,
   dropTestDatabase,
   seedJob,
-  testDatabaseUrl,
   waitFor,
 } from "./helpers"
 
