@@ -59,6 +59,20 @@ services:
   # To provision manually after a plain `docker compose up -d`:
   #   ./scripts/garage-provision.sh
 
+  # Worker: independent deployable that owns the job machinery (ADR-0004).
+  # Only built with `--profile full` so `pnpm services:up` stays as-is; the
+  # normal dev flow runs the worker via `pnpm dev` (turbo).
+  worker:
+    build:
+      context: ..
+      dockerfile: services/worker/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/catalog_forge
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles: ["full"]
+
 volumes:
   postgres-data:
   redis-data:
