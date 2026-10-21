@@ -9,13 +9,16 @@
  */
 import { sql } from "drizzle-orm"
 
+import type { Cache } from "@workspace/cache"
 import type { Db } from "@workspace/db"
 import type { Job } from "@workspace/db/schema"
 import { createLogger } from "@workspace/log"
 
+import { publishImportEvent } from "./events"
 import type { WorkerConfig } from "./config"
 import { resolveConfig } from "./config"
 import type { HandlerRegistry } from "./handlers"
+import { adoptQueuedImports } from "./imports"
 import type { ClaimedJob } from "./jobs"
 import {
   claimJob,
@@ -41,6 +44,12 @@ export interface CreateWorkerOptions {
   db: Db
   handlers: HandlerRegistry
   config?: Partial<WorkerConfig>
+  /**
+   * Redis client for the per-Import progress streams. When present, the
+   * machinery publishes `job_completed` facts as Jobs finish; handlers own
+   * the Import-level events (stage_changed, import_done).
+   */
+  cache?: Cache
 }
 
 /** Reassemble a full Job row around a claim (lease fields reflect the claim). */
@@ -79,6 +88,17 @@ export function createWorker(options: CreateWorkerOptions): WorkerHandle {
     try {
       await handler({ job: asJob(claimed, config.workerId), db: db.db, log })
       await completeJob(db.db, config, claimed.id)
+      if (options.cache) {
+        await publishImportEvent(options.cache, {
+          importId: claimed.importId,
+          type: "job_completed",
+          data: {
+            importId: claimed.importId,
+            stage: claimed.stage,
+            batchKey: claimed.batchKey,
+          },
+        })
+      }
       log.info(`job completed`, {
         stage: claimed.stage,
         batchKey: claimed.batchKey,
@@ -123,6 +143,16 @@ export function createWorker(options: CreateWorkerOptions): WorkerHandle {
   }
 
   async function sweepTick(): Promise<void> {
+    // Safety net, part 1: adopt Imports the web app queued (ADR-0004) so a
+    // fresh upload becomes claimable work at the next sweep.
+    const adopted = await adoptQueuedImports(db.db)
+    if (adopted > 0) {
+      log.info(`sweeper adopted queued imports`, {
+        count: adopted,
+        workerId: config.workerId,
+      })
+    }
+    // Safety net, part 2: reclaim Jobs whose leases expired (ADR-0003).
     const ids = await sweepExpiredJobs(db.db, config)
     if (ids.length > 0) {
       log.info(`sweeper reclaimed expired jobs`, {

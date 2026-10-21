@@ -399,6 +399,9 @@ importers:
       '@types/react-dom':
         specifier: ^19
         version: 19.3.0(@types/react@19.3.0)
+      '@types/yazl':
+        specifier: ^3.3.1
+        version: 3.3.1
       '@workspace/typescript-config':
         specifier: workspace:*
         version: link:../../tooling/typescript-config
@@ -460,6 +463,9 @@ importers:
       '@types/yauzl':
         specifier: ^2.10.3
         version: 2.10.3
+      '@types/yazl':
+        specifier: ^3.3.1
+        version: 3.3.1
       '@workspace/typescript-config':
         specifier: workspace:*
         version: link:../../tooling/typescript-config
@@ -2406,6 +2412,9 @@ packages:
 
   '@types/yauzl@2.10.3':
     resolution: {integrity: sha512-oJoftv0LSuaDZE3Le4DbKX+KS9G36NzOeSap90UIK0yMA/NhKJhqlSGtNDORNRaIbQfzjXDrQa0ytJ6mNRGz/Q==}
+
+  '@types/yazl@3.3.1':
+    resolution: {integrity: sha512-DIWfCKpsTp6hE5BDBHV3+fIL/bLUF9Bv13iDrWnMlmhQpH67buNvI291ZauQ1xcccxK3FqQ9honnXpq4R8NMuQ==}
 
   '@vitejs/plugin-react@6.1.2':
     resolution: {integrity: sha512-fhJNGUdscQa4HkI0xFxwonWyhnVReCPDbXI7FH7jmzpnVCrFQI7PRrhWecO263610vOrs9tr2Y4xcf8uAdFxbw==}
@@ -6004,6 +6013,10 @@ snapshots:
   '@types/validate-npm-package-name@4.0.2': {}
 
   '@types/yauzl@2.10.3':
+    dependencies:
+      '@types/node': 20.19.43
+
+  '@types/yazl@3.3.1':
     dependencies:
       '@types/node': 20.19.43
 

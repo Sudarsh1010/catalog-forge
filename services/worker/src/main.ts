@@ -7,37 +7,30 @@
  */
 import { createDb } from "@workspace/db"
 import { initLogger, toLoggerConfig } from "@workspace/log"
-
 import { createLogConfig } from "@workspace/log/config"
 
+import { createIntakeHandler } from "./intake"
 import { defineHandlers } from "./handlers"
+import { requireEnv } from "./env"
+import { resolveCacheFromEnv, resolveStorageFromEnv } from "./storage"
 import { createWorker } from "./worker"
 
 initLogger(toLoggerConfig(createLogConfig({ service: "worker" })))
 
-const databaseUrl = process.env.DATABASE_URL
-if (!databaseUrl) {
-  throw new Error(
-    "DATABASE_URL is not set. Export it in your shell (values live in the repo-root .env.example) and try again."
-  )
-}
-
+const databaseUrl = requireEnv("DATABASE_URL")
 const db = createDb({ url: databaseUrl })
+const storage = resolveStorageFromEnv()
+const cache = resolveCacheFromEnv()
 
 /**
- * Demo/seed handler: proves claim → heartbeat → complete end to end without
- * any provider. Later tickets register the real pipeline stages here.
+ * Ticket 2 pipeline surface: the intake Stage. Later tickets register
+ * clean/group/match-media/enrich/translate/finalise here (ADR-0002).
  */
 const handlers = defineHandlers({
-  demo: async ({ job, log }) => {
-    log.info(`demo handler running`, { attempts: job.attempts } as Record<
-      string,
-      unknown
-    >)
-  },
+  intake: createIntakeHandler({ storage, cache }),
 })
 
-const worker = createWorker({ db, handlers })
+const worker = createWorker({ db, handlers, cache })
 worker.start()
 
 let stopping = false

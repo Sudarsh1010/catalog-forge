@@ -29,6 +29,7 @@
   "devDependencies": {
     "@types/node": "^20",
     "@types/yauzl": "^2.10.3",
+    "@types/yazl": "^3.3.1",
     "@workspace/typescript-config": "workspace:*",
     "tsx": "^4.23.15",
     "typescript": "^5",
