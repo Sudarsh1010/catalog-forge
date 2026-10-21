@@ -1,0 +1,65 @@
+# Local development services. Endpoints and credentials are identical to the
+# nix variant (`nix run .#services`) — run one or the other, not both at once
+# (they share ports). App-facing values live in .env.example.
+
+name: catalog-forge
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: catalog_forge
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      # 18+ images keep data in a major-version subdirectory, so mount the
+      # parent dir (see docker-library/postgres#37)
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d catalog_forge"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--bind", "0.0.0.0", "--port", "6379"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  garage:
+    image: dxflrs/garage:v1.3.1
+    # The image is a bare scratch image (no shell) with the binary at /garage.
+    command: ["/garage", "-c", "/etc/garage/garage.toml", "server"]
+    ports:
+      - "127.0.0.1:9000:3900" # S3 API
+      - "127.0.0.1:3903:3903" # admin API (http://127.0.0.1:3903/health, /metrics)
+    volumes:
+      - ./garage.toml:/etc/garage/garage.toml:ro
+      - garage-data:/var/lib/garage
+    healthcheck:
+      test: ["CMD", "/garage", "-c", "/etc/garage/garage.toml", "status"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # Bucket/key provisioning (idempotent). The garage image has no shell, so the
+  # init logic runs from the host via `docker compose exec` — see
+  # scripts/garage-provision.sh. `pnpm services:up` runs it after --wait.
+  #
+  # To provision manually after a plain `docker compose up -d`:
+  #   ./scripts/garage-provision.sh
+
+volumes:
+  postgres-data:
+  redis-data:
+  garage-data:

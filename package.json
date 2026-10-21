@@ -10,7 +10,12 @@
     "lint:fix": "oxlint --fix",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
-    "prepare": "lefthook install"
+    "prepare": "lefthook install",
+    "services:up": "docker compose up -d --wait && ./scripts/garage-provision.sh",
+    "services:down": "docker compose down",
+    "services:reset": "docker compose down -v",
+    "services:logs": "docker compose logs -f",
+    "services:nix": "nix run .#services"
   },
   "devDependencies": {
     "@workspace/typescript-config": "workspace:*",

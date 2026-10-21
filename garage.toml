@@ -1,0 +1,23 @@
+# Garage (S3-compatible object storage) config for local development.
+# Used by docker-compose.yml. The nix variant (`nix run .#services`) generates
+# an equivalent config at .data/garage/garage.toml at runtime.
+#
+# These are dev-only credentials bound to 127.0.0.1 — safe to commit.
+
+# Single-node dev cluster.
+replication_factor = 1
+
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+
+# Fixed dev value (32 bytes hex) so the docker volume keeps working across restarts.
+rpc_secret = "da320c2505a1eec2dabaecae5b1a177150baaa818e3b483b655457458aff203e"
+rpc_bind_addr = "[::]:3901"
+
+[s3_api]
+api_bind_addr = "[::]:3900"
+s3_region = "us-east-1"
+
+[admin]
+api_bind_addr = "[::]:3903"
+admin_token = "dev-admin-token"
