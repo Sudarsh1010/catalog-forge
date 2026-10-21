@@ -213,8 +213,6 @@ export function roundScaledDivide(
   numerator: bigint,
   denominator: bigint
 ): bigint {
-  const doubled = numerator * 2n
-  const quotient = doubled / denominator
-  const remainder = doubled - quotient * denominator
-  return remainder * 2n >= denominator ? quotient + 1n : quotient
+  const numeratorHalved = numerator * 2n + denominator
+  return numeratorHalved / (denominator * 2n)
 }

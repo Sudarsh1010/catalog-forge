@@ -351,9 +351,9 @@ function cleanQuantity(text: string, plan: CleanColumnPlan): CellCleanResult {
           numeric.kind === "ambiguous" ? "EC-038" : "EC-048",
           numeric.kind === "ambiguous"
             ? "quantity_locale_ambiguous"
-            : "quantity_not_numeric",
+            : "quantity_unparseable",
           plan.index,
-          `"${plan.header}" value "${text.trim()}" could not be resolved to a number — preserved raw.`
+          `"${plan.header}" value "${text.trim()}" is not a single convertible quantity (range, dimension list, or garbage) — preserved raw.`
         ),
       ],
     }

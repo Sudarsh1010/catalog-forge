@@ -252,29 +252,29 @@ describe("clean chunk handler (idempotent upserts, ADR-0003)", () => {
   })
 })
 
-describe("price normalization (EC-038/EC-039/EC-040)", () => {
-  /** Plan + run one chunk, return one row's cleaned values + flags. */
-  async function cleanOnce(
-    header: string[],
-    rows: SheetCell[][]
-  ): Promise<
-    Array<{ values: Array<CleanedCell | null>; flags: Array<CleanedFlag> }>
-  > {
-    const imp = await seedImport(db, {
-      status: "running",
-      stage: "clean",
-      sheetHeader: header,
-    })
-    await seedSheetRows(imp.id, rows)
-    await planCleanStage(db.db, { importId: imp.id, storeId: imp.storeId })
-    await runCleanWorker(imp.id)
-    const projection = await cleanedProjection(imp.id)
-    return projection as Array<{
-      values: Array<CleanedCell | null>
-      flags: Array<CleanedFlag>
-    }>
-  }
+/** Plan + run one chunk, return the cleaned rows (values + flags) in order. */
+async function cleanOnce(
+  header: string[],
+  rows: SheetCell[][]
+): Promise<
+  Array<{ values: Array<CleanedCell | null>; flags: Array<CleanedFlag> }>
+> {
+  const imp = await seedImport(db, {
+    status: "running",
+    stage: "clean",
+    sheetHeader: header,
+  })
+  await seedSheetRows(imp.id, rows)
+  await planCleanStage(db.db, { importId: imp.id, storeId: imp.storeId })
+  await runCleanWorker(imp.id)
+  const projection = await cleanedProjection(imp.id)
+  return projection as Array<{
+    values: Array<CleanedCell | null>
+    flags: Array<CleanedFlag>
+  }>
+}
 
+describe("price normalization (EC-038/EC-039/EC-040)", () => {
   it("golden prices_de: every §5 format in one column with known-good parsed values", async () => {
     const rows = await cleanOnce(
       ["Preis"],
@@ -453,6 +453,237 @@ describe("price normalization (EC-038/EC-039/EC-040)", () => {
     expect(rows[1]?.flags).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ ec: "EC-045", code: "price_rounded" }),
+      ])
+    )
+  })
+})
+
+describe("unit normalization (EC-047/EC-048/EC-049, EC-026)", () => {
+  it("converts cm/inch and kg/lb/oz families to canonical metric integers with one half-up rounding", async () => {
+    const rows = await cleanOnce(
+      ["Länge (cm)", "Durchmesser", "Gewicht", "Volumen (l)"],
+      [
+        // Länge: header unit for the bare cell, cell unit when present.
+        ["50", 'Ø 19.6"', "1,5 kg", "1,5"],
+        ["ca. 50 cm", "50 cm", "2 lb", "32 fl oz"],
+        ["0,5 m", "50-60 cm", "16 oz", "750"],
+        [null, "50 x 30 x 20", "500", null],
+      ]
+    )
+
+    // 50 → 500 mm (EC-026: unit from header, noted); 0,5 m → 500 mm (de vote).
+    expect(rows[0]?.values[0]).toEqual({
+      kind: "quantity",
+      value: 500,
+      unit: "mm",
+      original: "50",
+    })
+    expect(rows[0]?.flags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ec: "EC-026",
+          code: "quantity_unit_from_header",
+        }),
+      ])
+    )
+    expect(rows[2]?.values[0]).toEqual({
+      kind: "quantity",
+      value: 500,
+      unit: "mm",
+      original: "0,5 m",
+    })
+    expect(rows[1]?.values[0]).toEqual({
+      kind: "quantity",
+      value: 500,
+      unit: "mm",
+      original: "ca. 50 cm",
+    })
+
+    // EC-047: 19.6" → 497.84 mm → 498 mm (no false precision).
+    expect(rows[0]?.values[1]).toEqual({
+      kind: "quantity",
+      value: 498,
+      unit: "mm",
+      original: 'Ø 19.6"',
+    })
+    expect(rows[1]?.values[1]).toEqual({
+      kind: "quantity",
+      value: 500,
+      unit: "mm",
+      original: "50 cm",
+    })
+    // EC-048: ranges and dimension lists are garbage here — flagged, raw kept.
+    expect(rows[2]?.values[1]).toEqual({
+      kind: "unparseable",
+      value: "50-60 cm",
+    })
+    expect(rows[2]?.flags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ ec: "EC-048", code: "quantity_unparseable" }),
+      ])
+    )
+    expect(rows[3]?.values[1]).toEqual({
+      kind: "unparseable",
+      value: "50 x 30 x 20",
+    })
+
+    // Weight: 1,5 kg (de vote) → 1500 g; 2 lb → 907 g; 16 oz → 454 g.
+    expect(rows[0]?.values[2]).toEqual({
+      kind: "quantity",
+      value: 1500,
+      unit: "g",
+      original: "1,5 kg",
+    })
+    expect(rows[1]?.values[2]).toEqual({
+      kind: "quantity",
+      value: 907,
+      unit: "g",
+      original: "2 lb",
+    })
+    expect(rows[2]?.values[2]).toEqual({
+      kind: "quantity",
+      value: 454,
+      unit: "g",
+      original: "16 oz",
+    })
+    // 500 in a column with no unit anywhere → unconvertible, flagged (EC-026).
+    expect(rows[3]?.values[2]).toEqual({ kind: "unparseable", value: "500" })
+    expect(rows[3]?.flags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ec: "EC-026",
+          code: "quantity_unit_missing",
+        }),
+      ])
+    )
+
+    // Volume: 1,5 l → 1500 ml; 32 fl oz → 946 ml; 750 (header l) → 750000 ml.
+    expect(rows[0]?.values[3]).toEqual({
+      kind: "quantity",
+      value: 1500,
+      unit: "ml",
+      original: "1,5",
+    })
+    expect(rows[1]?.values[3]).toEqual({
+      kind: "quantity",
+      value: 946,
+      unit: "ml",
+      original: "32 fl oz",
+    })
+    expect(rows[2]?.values[3]).toEqual({
+      kind: "quantity",
+      value: 750000,
+      unit: "ml",
+      original: "750",
+    })
+  })
+})
+
+describe("encoding repair and key normalization (EC-002/EC-020/EC-053/EC-057)", () => {
+  it("repairs mojibake, preserves display originals, folds keys to NFC+ASCII base forms", async () => {
+    const nfdName = "Ka\u0308se" // NFD decomposition — macOS exports (EC-053)
+    const rows = await cleanOnce(
+      ["Name", "Beschreibung"],
+      [
+        ["KÃ¤se", "Wanduhr “premium”"], // mojibake + AutoCorrect smart quotes
+        [nfdName, "top\u200b\u00ad grade"], // NFD + zero-width + soft hyphen
+        ["K\uFFFDse", "<p>a <b>bold</b> &amp; mehr</p><o:p>junk</o:p>"],
+      ]
+    )
+
+    // EC-002: repair applied, flag carries provenance.
+    expect(rows[0]?.values[0]).toMatchObject({ kind: "text", value: "Käse" })
+    expect(rows[0]?.flags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ ec: "EC-002", code: "encoding_repaired" }),
+      ])
+    )
+    // EC-053: display keeps the supplier's NFD form; the key is NFC.
+    expect(rows[1]?.values[0]).toMatchObject({ kind: "text", value: nfdName })
+    expect(rows[1]?.values[0]).toMatchObject({ kind: "text", key: "käse" })
+    // Both spellings land on the same matching key.
+    expect(rows[0]?.values[0]).toMatchObject({ kind: "text", key: "käse" })
+    // EC-020: smart quotes fold in the key, display keeps them.
+    expect(rows[0]?.values[1]).toMatchObject({
+      kind: "text",
+      value: "Wanduhr “premium”",
+      key: 'wanduhr "premium"',
+    })
+    // EC-057: zero-width/soft-hyphen stripped, flagged; key collapses spaces.
+    expect(rows[1]?.values[1]).toMatchObject({
+      kind: "text",
+      value: "top grade",
+      key: "top grade",
+    })
+    expect(rows[1]?.flags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ec: "EC-057",
+          code: "invisible_chars_stripped",
+        }),
+      ])
+    )
+    // EC-002: U+FFFD is already-destroyed data — flagged unrecoverable, kept.
+    expect(rows[2]?.values[0]).toMatchObject({
+      kind: "text",
+      value: "K\uFFFDse",
+    })
+    expect(rows[2]?.flags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ec: "EC-002",
+          code: "encoding_unrecoverable",
+        }),
+      ])
+    )
+    // EC-056: benign markup survives, Word junk tag stripped, entity kept.
+    expect(rows[2]?.values[1]).toEqual({
+      kind: "html",
+      value: "<p>a <b>bold</b> &amp; mehr</p>junk",
+    })
+    expect(rows[2]?.flags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ ec: "EC-056", code: "html_sanitized" }),
+      ])
+    )
+  })
+
+  it("strips scripts, event handlers and unsafe embeds while balancing benign markup", async () => {
+    const rows = await cleanOnce(
+      ["Beschreibung"],
+      [
+        ["<p>ok</p><script>alert(1)</script>"],
+        ['<b onclick="steal()">hi</b><br/>'],
+        ["<p>unclosed"],
+        ['<iframe src="http://evil"></iframe>plain'],
+        ["a < b and 5>3"], // no markup: stays text
+      ]
+    )
+    expect(rows[0]?.values[0]).toEqual({ kind: "html", value: "<p>ok</p>" })
+    expect(rows[1]?.values[0]).toEqual({
+      kind: "html",
+      value: "<b>hi</b><br/>",
+    })
+    expect(rows[2]?.values[0]).toEqual({
+      kind: "html",
+      value: "<p>unclosed</p>",
+    })
+    expect(rows[3]?.values[0]).toEqual({ kind: "html", value: "plain" })
+    expect(rows[4]?.values[0]).toMatchObject({
+      kind: "text",
+      value: "a < b and 5>3",
+    })
+    // Every sanitized row carries the EC-056 trail; the plain text row does not.
+    for (const index of [0, 1, 2, 3]) {
+      expect(rows[index]?.flags).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ ec: "EC-056", code: "html_sanitized" }),
+        ])
+      )
+    }
+    expect(rows[4]?.flags).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "html_sanitized" }),
       ])
     )
   })

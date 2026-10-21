@@ -76,6 +76,7 @@ const CELL_UNITS: UnitDef[] = [
   { ...foot, token: "'" },
   { family: "weight", factorN: 1n, factorD: 1000n, token: "mg" },
   { family: "weight", factorN: 1n, factorD: 1n, token: "g" },
+  { family: "weight", factorN: 1000n, factorD: 1n, token: "kg" },
   { ...pound, token: "lbs" },
   pound,
   { ...pound, token: "pounds" },

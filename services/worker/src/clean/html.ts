@@ -97,7 +97,7 @@ function escapeText(text: string): string {
 
 /** True when a cell carries recognizable markup (per-cell sanitize decision). */
 export function isLikelyHtml(text: string): boolean {
-  return /<\/?(?:p|br|b|div|span|ul|ol|li|table|t[dhr]|thead|tbody|strong|em|i|u|h[1-6]|font|a|img|script|style|o:p)\b[\s\S]*?>/i.test(
+  return /<\/?(?:p|br|b|div|span|ul|ol|li|table|t[dhr]|thead|tbody|strong|em|i|u|h[1-6]|font|a|img|script|style|iframe|object|embed|template|noscript|o:p)\b[\s\S]*?>/i.test(
     text
   )
 }
