@@ -57,8 +57,10 @@ function countHints(text: string): number {
  * deliberately kept in display values (French typography); the match key
  * folds it away.
  */
+/* oxlint-disable no-control-regex -- intentional: C0/C1 + invisible codepoints per EC-057 */
 const INVISIBLE_CHARS =
   /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u0080-\u009f\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff]/g
+/* oxlint-enable no-control-regex */
 
 export function stripInvisible(text: string): {
   value: string
