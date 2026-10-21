@@ -26,8 +26,6 @@
             corepack_24
             curl
             pkg-config
-
-            boost
           ];
 
           # Corepack refuses to write shims into the read-only Nix store, so
