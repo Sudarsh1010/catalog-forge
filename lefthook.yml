@@ -1,0 +1,16 @@
+# Lefthook configuration
+# https://github.com/evilmartians/lefthook
+
+pre-commit:
+  parallel: true
+  jobs:
+    # Jobs with a glob are skipped entirely when no staged file matches,
+    # so docs/config-only commits don't fail with "No files found to lint".
+    - name: oxlint
+      glob: "*.{js,jsx,ts,tsx,mjs,cjs}"
+      run: pnpm oxlint --fix {staged_files}
+      stage_fixed: true
+    - name: oxfmt
+      glob: "*.{js,jsx,ts,tsx,mjs,cjs,json,jsonc}"
+      run: pnpm oxfmt --write {staged_files}
+      stage_fixed: true
