@@ -1,0 +1,28 @@
+// Oxfmt configuration
+// https://oxc.rs/docs/guide/usage/formatter/config
+//
+// Mirrors the previous .prettierrc options (defaults omitted) and
+// replaces prettier-plugin-tailwindcss with the built-in class sorter.
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 80,
+  "semi": false,
+  "trailingComma": "es5",
+  "sortTailwindcss": {
+    // Tailwind v4 theme source (was "tailwindStylesheet")
+    "stylesheet": "packages/ui/src/styles/globals.css",
+    // was "tailwindFunctions"
+    "functions": ["cn", "cva"]
+  },
+  // was .prettierignore
+  "ignorePatterns": [
+    "dist",
+    "node_modules",
+    ".next",
+    ".turbo",
+    "coverage",
+    "pnpm-lock.yaml",
+    ".pnpm-store",
+    ".agents"
+  ]
+}

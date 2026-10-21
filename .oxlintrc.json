@@ -1,0 +1,26 @@
+// Oxlint configuration
+// https://oxc.rs/docs/guide/usage/linter/config
+//
+// Plugins follow Vercel's official `with-oxlint` example:
+// - eslint/typescript/unicorn/oxc are oxlint's defaults (listed for clarity)
+// - react also ports eslint-plugin-react-hooks and the React Compiler rules
+// - nextjs ports @next/eslint-plugin-next (not enabled by default)
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["eslint", "react", "unicorn", "oxc", "typescript", "nextjs"],
+  "settings": {
+    "next": {
+      "rootDir": "platform/app"
+    }
+  },
+  "ignorePatterns": [
+    "node_modules/**",
+    ".next/**",
+    "out/**",
+    "dist/**",
+    "build/**",
+    ".turbo/**",
+    "coverage/**",
+    "next-env.d.ts"
+  ]
+}
