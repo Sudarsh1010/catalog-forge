@@ -1,7 +1,8 @@
 /**
- * App route-test harness: a throwaway `catalog_forge_test` database (Ticket
- * 1 convention), a dedicated Redis DB index, and a real `next dev` server so
- * routes are exercised through plain HTTP — the web seam.
+ * App route-test harness: a throwaway `catalog_forge_test_app` database
+ * (Ticket 1 convention, app-suffixed so worker and app suites can run in
+ * parallel under turbo), a dedicated Redis DB index, and a real `next dev`
+ * server so routes are exercised through plain HTTP — the web seam.
  */
 import { spawn, type ChildProcess } from "node:child_process"
 import { createServer } from "node:net"
@@ -18,9 +19,9 @@ import Yazl from "yazl"
 import { sql } from "drizzle-orm"
 import postgres from "postgres"
 
-export const TEST_DB_NAME = "catalog_forge_test"
+export const TEST_DB_NAME = "catalog_forge_test_app"
 export const TEST_REDIS_URL =
-  process.env.REDIS_URL ?? "redis://127.0.0.1:6379/9"
+  process.env.REDIS_URL ?? "redis://127.0.0.1:6379/10"
 
 const devUrl =
   process.env.DATABASE_URL ??
