@@ -1,6 +1,7 @@
 import { Geist, Geist_Mono, Lora } from "next/font/google"
 
 import "@workspace/ui/globals.css"
+import { EvlogProvider } from "evlog/next/client"
 import { ThemeProvider } from "@/components/theme-provider"
 import { cn } from "@workspace/ui/lib/utils"
 
@@ -31,7 +32,9 @@ export default function RootLayout({
       )}
     >
       <body>
-        <ThemeProvider>{children}</ThemeProvider>
+        <EvlogProvider service="web" transport={{ enabled: false }}>
+          <ThemeProvider>{children}</ThemeProvider>
+        </EvlogProvider>
       </body>
     </html>
   )
