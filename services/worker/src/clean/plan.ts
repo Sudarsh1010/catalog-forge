@@ -192,14 +192,15 @@ function scanCell(scan: ColumnScan, cell: string | number | boolean): void {
   }
   if (currency.ambiguousSymbol) scan.sawAmbiguousDollar = true
 
-  // A currency token turns the column into money regardless of header.
-  if (currency.currencies.length > 0) return
-
+  // The number part votes on the column's decimal convention whether or
+  // not a currency token shared the cell (`1.299,00 €` proves de).
   const numeric = scanNumber(currency.rest)
   if (numeric.kind === "exact" && numeric.locale) {
     scan.localeVotes[numeric.locale]++
   }
-  if (looksLikeQuantity(text)) scan.quantityShaped++
+  if (currency.currencies.length === 0 && looksLikeQuantity(text)) {
+    scan.quantityShaped++
+  }
 }
 
 /** Decide one column's plan from its accumulated scan (deterministic). */
@@ -225,6 +226,7 @@ function decideColumn(scan: ColumnScan): CleanColumnPlan {
       decimalLocale: voteLocale(scan),
       currency: null,
       currencyAssumed: false,
+      defaultUnit: unitFromHeader(scan.header)?.unit.token ?? null,
     }
   }
   return {

@@ -83,6 +83,12 @@ export interface CleanColumnPlan {
   currency: string | null
   /** True when `currency` was defaulted, not observed (EC-040). */
   currencyAssumed: boolean
+  /**
+   * Quantity columns: the unit carried by the header ("Länge (cm)" → `cm`,
+   * EC-026) — the default for cells without an explicit unit. `null` when
+   * the header carries none.
+   */
+  defaultUnit?: string | null
 }
 
 /** One Import's clean plan (planned up front when the Stage begins). */

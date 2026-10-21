@@ -80,7 +80,7 @@ export function scanNumber(raw: string): NumberScan {
 
   const sep = dots > 0 ? "." : ","
   const parts = body.split(sep)
-  if (parts.length === 1) {
+  if (parts.length === 2) {
     // One separator occurrence: `[int][sep][frac]`.
     const [intPart, fracPart = ""] = parts
     if (fracPart.length === 3) {
@@ -176,12 +176,13 @@ export function scaledToCents(
   scaled: ScaledInteger,
   onRounded?: (droppedDigits: string) => void
 ): number | null {
-  const padded = scaled.digits.padStart(scaled.fractionCount + 1, "0")
-  const cut = padded.length - scaled.fractionCount + 2
-  if (cut < 1) return null
-  const head = padded.slice(0, cut)
-  const tail = padded.slice(cut)
+  const intDigits = Math.max(0, scaled.digits.length - scaled.fractionCount)
+  // `.5` arrives as digits "5" with fractionCount 1: the integer part is 0.
+  const intPart = scaled.digits.slice(0, intDigits).padStart(1, "0")
+  const fraction = scaled.digits.slice(intDigits)
+  const head = intPart + fraction.padEnd(2, "0").slice(0, 2)
   if (head.length > 15) return null
+  const tail = fraction.length > 2 ? fraction.slice(2) : ""
   let cents = Number(head)
   if (tail !== "" && tail[0]! >= "5") cents += 1
   if (tail !== "" && /[1-9]/.test(tail) && onRounded) onRounded(tail)

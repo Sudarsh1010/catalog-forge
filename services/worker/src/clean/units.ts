@@ -155,6 +155,13 @@ export function looksLikeQuantity(text: string): boolean {
   return splitQuantityCell(text) !== null
 }
 
+/** Look a unit token back up (column plans store the header's token). */
+export function unitByToken(token: string): UnitDef | null {
+  return CELL_UNITS.find((unit) => unit.token === token) ?? null
+}
+
+export type { UnitDef }
+
 /**
  * Convert a scaled-integer value from its unit to the family's canonical
  * unit, with exactly one half-up rounding (EC-047: no false precision).
