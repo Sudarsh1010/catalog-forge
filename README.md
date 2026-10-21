@@ -9,11 +9,11 @@ was archived upstream in Feb 2026 and removed from nixpkgs). Two
 interchangeable ways to run them; both serve identical endpoints and
 credentials. Run one or the other, not both at once (they share ports).
 
-| Service      | Endpoint                                            |
-| ------------ | --------------------------------------------------- |
-| Postgres 18  | `postgresql://postgres:postgres@127.0.0.1:5432/catalog_forge` |
-| Redis 8      | `redis://127.0.0.1:6379`                            |
-| Garage (S3)  | `http://127.0.0.1:9000` (creds in `.env.example`)   |
+| Service     | Endpoint                                                      |
+| ----------- | ------------------------------------------------------------- |
+| Postgres 18 | `postgresql://postgres:postgres@127.0.0.1:5432/catalog_forge` |
+| Redis 8     | `redis://127.0.0.1:6379`                                      |
+| Garage (S3) | `http://127.0.0.1:9000` (creds in `.env.example`)             |
 
 ### Docker
 

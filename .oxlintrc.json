@@ -21,6 +21,7 @@
     "build/**",
     ".turbo/**",
     "coverage/**",
-    "next-env.d.ts"
+    "next-env.d.ts",
+    "**/routeTree.gen.ts"
   ]
 }
