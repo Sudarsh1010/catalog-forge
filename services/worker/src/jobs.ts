@@ -39,9 +39,10 @@ interface ClaimedRow {
  * Drizzle's postgres-js `db.execute` resolves to a postgres.js RowList — an
  * array of the query's rows. Every raw SQL statement below returns a
  * hand-written `RETURNING` projection, so casting the RowList to that named
- * row type once at the boundary is exact, not fabricated.
+ * row type once at the boundary is exact, not fabricated. Shared with the
+ * Import machinery (imports.ts), which follows the same pattern.
  */
-function rowsOf<T>(result: unknown): T[] {
+export function rowsOf<T>(result: unknown): T[] {
   return result as T[]
 }
 

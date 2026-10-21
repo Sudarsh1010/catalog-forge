@@ -5,6 +5,8 @@ const nextConfig: NextConfig = {
     "@workspace/cache",
     "@workspace/db",
     "@workspace/log",
+    "@workspace/pipeline",
+    "@workspace/storage",
     "@workspace/ui",
   ],
 }
