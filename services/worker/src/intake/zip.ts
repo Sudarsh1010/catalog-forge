@@ -10,8 +10,6 @@
 import { type Readable } from "node:stream"
 import path from "node:path"
 
-import yauzl from "yauzl"
-
 import type { Limits } from "@workspace/pipeline"
 
 import { IntakeError } from "./errors"

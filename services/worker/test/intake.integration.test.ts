@@ -58,6 +58,7 @@ beforeEach(async () => {
 afterAll(async () => {
   await db.close()
   await flushTestRedis()
+  await dropTestDatabase()
 })
 
 /** Fast real loops: claim/sweep within milliseconds, TTL 2s. */
