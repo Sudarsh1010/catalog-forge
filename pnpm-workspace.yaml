@@ -3,6 +3,7 @@ packages:
   - "packages/*"
   - "platform/*"
   - "shared/*"
+  - "services/*"
   - "tooling/*"
 
 allowBuilds:
