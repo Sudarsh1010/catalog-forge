@@ -17,7 +17,25 @@ export {
   rowsOf,
 } from "./jobs"
 export type { ClaimedJob } from "./jobs"
-export { adoptQueuedImports, failImport, completeIntake } from "./imports"
+export {
+  adoptQueuedImports,
+  failImport,
+  completeIntake,
+  sweepStalledStageAdvances,
+} from "./imports"
+export type {
+  StagePlanTarget,
+  StagePlanner,
+  StagePlannerRegistry,
+} from "./stages"
+export {
+  planCleanStage,
+  parseBatchKey,
+  batchKey,
+  CLEAN_CHUNK_SIZE,
+} from "./clean/plan"
+export type { PlanCleanOptions, CleanStageTarget } from "./clean/plan"
+export { createCleanHandler } from "./clean/handler"
 export { publishImportEvent } from "./events"
 export { createIntakeHandler } from "./intake"
 export type { IntakeDeps } from "./intake"

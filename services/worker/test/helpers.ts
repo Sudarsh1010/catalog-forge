@@ -133,6 +133,8 @@ export interface SeedImportOptions {
   stage?: string
   sheetFormat?: "csv" | "xlsx"
   originalFilename?: string
+  /** Header cells intake landed (clean tests need column names). */
+  sheetHeader?: string[]
 }
 
 export interface SeededImport {
@@ -159,11 +161,12 @@ export async function seedImport(
   await db.db.execute(sql`
     INSERT INTO imports (
       id, store_id, content_hash, original_filename, sheet_format,
-      sheet_object_key, status, stage
+      sheet_object_key, status, stage, sheet_header
     ) VALUES (
       ${id}, ${storeId}, ${contentHash}, ${options.originalFilename ?? "sheet.csv"},
       ${options.sheetFormat ?? "csv"}, ${sheetObjectKey},
-      ${options.status ?? "queued"}, ${options.stage ?? "intake"}
+      ${options.status ?? "queued"}, ${options.stage ?? "intake"},
+      ${options.sheetHeader ? JSON.stringify(options.sheetHeader) : null}::jsonb
     )
   `)
   return { id, storeId, contentHash, sheetObjectKey }

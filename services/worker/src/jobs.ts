@@ -9,8 +9,10 @@ import { sql } from "drizzle-orm"
 
 import type { Database } from "@workspace/db"
 import type { Job } from "@workspace/db/schema"
+import { isStage, nextStage, type Stage } from "@workspace/pipeline"
 
 import type { WorkerConfig } from "./config"
+import type { StagePlannerRegistry } from "./stages"
 
 /** The subset of a Job row the machinery touches. */
 export type ClaimedJob = Pick<
@@ -108,20 +110,68 @@ export async function heartbeatJob(
   return rows.length > 0
 }
 
-/** Mark a Job completed (terminal for this ticket; Row Ledger comes later). */
+/**
+ * Mark a Job completed. When this completion leaves no other pending or
+ * running Job in the same (Import, Stage), the Import advances to the next
+ * Stage of the fixed machine inside the SAME transaction (ADR-0002: the
+ * last job of a stage advances the Import and plans the next stage in its
+ * completion transaction). The next Stage's planner — when one is
+ * registered — runs in that transaction too; a missing planner only means
+ * the stage value advances (its ticket plugs planning in later).
+ *
+ * Returns the Stage advanced to, or `null` when the lease was lost (no-op)
+ * or the Import did not advance yet (siblings outstanding).
+ */
 export async function completeJob(
   db: Database,
   config: WorkerConfig,
-  jobId: string
-): Promise<void> {
-  await db.execute(sql`
-    UPDATE jobs SET
-      status = 'completed',
-      lease_owner = NULL,
-      lease_expires_at = NULL,
-      updated_at = now()
-    WHERE id = ${jobId} AND status = 'running' AND lease_owner = ${config.workerId}
-  `)
+  jobId: string,
+  planners?: StagePlannerRegistry
+): Promise<{ advancedTo: Stage | null }> {
+  return db.transaction(async (tx) => {
+    const completed = rowsOf<{
+      import_id: string
+      store_id: string
+      stage: string
+    }>(
+      await tx.execute(sql`
+        UPDATE jobs SET
+          status = 'completed',
+          lease_owner = NULL,
+          lease_expires_at = NULL,
+          updated_at = now()
+        WHERE id = ${jobId} AND status = 'running' AND lease_owner = ${config.workerId}
+        RETURNING import_id, store_id, stage
+      `)
+    )
+    const row = completed[0]
+    if (!row) return { advancedTo: null } // lease lost; another worker owns it
+    if (!isStage(row.stage)) return { advancedTo: null } // non-pipeline stage
+    const next = nextStage(row.stage)
+    if (!next) return { advancedTo: null } // end of the pipeline
+
+    const advanced = rowsOf<{ id: string }>(
+      await tx.execute(sql`
+        UPDATE imports SET
+          stage = ${next},
+          updated_at = now()
+        WHERE id = ${row.import_id} AND status = 'running' AND stage = ${row.stage}
+          AND NOT EXISTS (
+            SELECT 1 FROM jobs
+            WHERE import_id = ${row.import_id} AND stage = ${row.stage}
+              AND status IN ('pending', 'running') AND id <> ${jobId}
+          )
+        RETURNING id
+      `)
+    )
+    if (advanced.length === 0) return { advancedTo: null }
+
+    const planner = planners?.[next]
+    if (planner) {
+      await planner(tx, { importId: row.import_id, storeId: row.store_id })
+    }
+    return { advancedTo: next }
+  })
 }
 
 /**
