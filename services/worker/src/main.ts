@@ -10,6 +10,8 @@ import { initLogger, toLoggerConfig } from "@workspace/log"
 import { createLogConfig } from "@workspace/log/config"
 
 import { createIntakeHandler } from "./intake"
+import { createCleanHandler } from "./clean/handler"
+import { planCleanStage } from "./clean/plan"
 import { defineHandlers } from "./handlers"
 import { requireEnv } from "./env"
 import { resolveCacheFromEnv, resolveStorageFromEnv } from "./storage"
@@ -23,14 +25,27 @@ const storage = resolveStorageFromEnv()
 const cache = resolveCacheFromEnv()
 
 /**
- * Ticket 2 pipeline surface: the intake Stage. Later tickets register
- * clean/group/match-media/enrich/translate/finalise here (ADR-0002).
+ * Ticket 3 pipeline surface: the intake and clean Stages. Later tickets
+ * register group/match-media/enrich/translate/finalise here (ADR-0002).
+ * `planners` carries the plan-then-execute step: entering `clean` plans its
+ * row-chunk Jobs in the advancing transaction; entering `group` only flips
+ * the stage value until Ticket 4 plugs its barrier planner in.
  */
 const handlers = defineHandlers({
-  intake: createIntakeHandler({ storage, cache }),
+  intake: createIntakeHandler({
+    storage,
+    cache,
+    planNextStage: planCleanStage,
+  }),
+  clean: createCleanHandler(),
 })
 
-const worker = createWorker({ db, handlers, cache })
+const worker = createWorker({
+  db,
+  handlers,
+  cache,
+  planners: { clean: planCleanStage },
+})
 worker.start()
 
 let stopping = false

@@ -20,14 +20,20 @@ import type {
 
 import { planCleanStage } from "../src/clean/plan.js"
 import { createCleanHandler } from "../src/clean/handler.js"
+import { importStreamKey } from "@workspace/pipeline"
 import {
   connectTestDb,
   createTestDatabase,
   dropTestDatabase,
   seedImport,
+  testCache,
+  testStorage,
+  putTestObject,
   waitFor,
 } from "./helpers"
+import { csvBytes } from "./fixtures"
 import { createWorker, defineHandlers, resolveConfig } from "../src/index.js"
+import { createIntakeHandler } from "../src/intake.js"
 
 let db: Db
 
@@ -686,5 +692,265 @@ describe("encoding repair and key normalization (EC-002/EC-020/EC-053/EC-057)", 
         expect.objectContaining({ code: "html_sanitized" }),
       ])
     )
+  })
+})
+
+describe("decentralized stage advancement (ADR-0002) and live progress", () => {
+  it("advances the Import to group in the last chunk's completion transaction, emitting per-chunk job_completed and stage_changed events", async () => {
+    const imp = await seedImport(db, {
+      status: "running",
+      stage: "clean",
+      sheetHeader: ["Preis"],
+    })
+    await seedSheetRows(imp.id, [["12,50"], ["13,50"], ["14,50"], ["15,50"]])
+    await planCleanStage(
+      db.db,
+      { importId: imp.id, storeId: imp.storeId },
+      { chunkSize: 2 }
+    )
+    const cache = testCache()
+    await cache.redis.del(importStreamKey(imp.id))
+
+    const worker = createWorker({
+      db,
+      handlers: defineHandlers({ clean: createCleanHandler() }),
+      cache,
+      planners: { clean: planCleanStage },
+      config: resolveConfig({
+        workerId: "w-advance",
+        claimIntervalMs: 10,
+        heartbeatIntervalMs: 50,
+        sweepIntervalMs: 25,
+        leaseTtlMs: 2_000,
+        batchSize: 10,
+      }),
+    })
+    worker.start()
+    try {
+      await waitFor("import advanced to group", async () => {
+        const rows = (await db.db.execute(sql`
+          SELECT stage FROM imports WHERE id = ${imp.id}
+        `)) as unknown as Array<{ stage: string }>
+        return rows[0]?.stage === "group"
+      })
+
+      // Both chunks cleaned before the barrier stage begins.
+      const jobs = (await db.db.execute(sql`
+        SELECT status, count(*)::int AS n FROM jobs
+        WHERE import_id = ${imp.id} AND stage = 'clean' GROUP BY status
+      `)) as unknown as Array<{ status: string; n: number }>
+      expect(jobs).toEqual([{ status: "completed", n: 2 }])
+      // Ticket-4 seam: the stage value advanced, but no group Jobs exist —
+      // the next planner does not exist yet and nothing guessed at one.
+      const groupJobs = (await db.db.execute(sql`
+        SELECT count(*)::int AS n FROM jobs WHERE import_id = ${imp.id} AND stage = 'group'
+      `)) as unknown as Array<{ n: number }>
+      expect(groupJobs[0]?.n).toBe(0)
+
+      // The lossy stream the SSE endpoint tails: one job_completed per
+      // chunk, then stage_changed clean → group.
+      const events = (await cache.redis.xrange(
+        importStreamKey(imp.id),
+        "-",
+        "+"
+      )) as Array<[string, string[]]>
+      const types: Array<{
+        type: string
+        data: Record<string, unknown>
+      }> = []
+      for (const [, fields] of events) {
+        const flat = new Map<string, string>()
+        for (let f = 0; f < fields.length; f += 2) {
+          flat.set(fields[f]!, fields[f + 1]!)
+        }
+        // The stream carries the full ImportEvent envelope; unwrap it.
+        const event = JSON.parse(flat.get("data") ?? "{}") as {
+          type: string
+          data: Record<string, unknown>
+        }
+        types.push({ type: event.type, data: event.data })
+      }
+      expect(types.map((t) => t.type)).toEqual([
+        "job_completed",
+        "job_completed",
+        "stage_changed",
+      ])
+      // Chunks race, so the two completions may arrive in either order.
+      expect(
+        types
+          .slice(0, 2)
+          .map((t) => t.data.batchKey)
+          .sort()
+      ).toEqual(["rows-000001-000002", "rows-000003-000004"])
+      expect(types.slice(0, 2).every((t) => t.data.stage === "clean")).toBe(
+        true
+      )
+      expect(types[2]?.data).toMatchObject({ from: "clean", to: "group" })
+    } finally {
+      await worker.stop()
+      await cache.close()
+    }
+  })
+
+  it("sweeper advances a stranded Import as the safety net (last chunk completed, advance lost)", async () => {
+    const imp = await seedImport(db, {
+      status: "running",
+      stage: "clean",
+      sheetHeader: ["Name"],
+    })
+    await seedSheetRows(imp.id, [["x"]])
+    await planCleanStage(db.db, { importId: imp.id, storeId: imp.storeId })
+    // Crash shape: the chunk completed but the advance never happened.
+    await db.db.execute(sql`
+      UPDATE jobs SET status = 'completed'
+      WHERE import_id = ${imp.id} AND stage = 'clean'
+    `)
+
+    const worker = createWorker({
+      db,
+      handlers: defineHandlers({ clean: createCleanHandler() }),
+      planners: { clean: planCleanStage },
+      config: resolveConfig({
+        workerId: "w-sweep-advance",
+        claimIntervalMs: 10,
+        heartbeatIntervalMs: 50,
+        sweepIntervalMs: 25,
+        leaseTtlMs: 2_000,
+        batchSize: 10,
+      }),
+    })
+    worker.start()
+    try {
+      await waitFor("sweeper advanced stranded import", async () => {
+        const rows = (await db.db.execute(sql`
+          SELECT stage FROM imports WHERE id = ${imp.id}
+        `)) as unknown as Array<{ stage: string }>
+        return rows[0]?.stage === "group"
+      })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  it("sweeper plans clean Jobs for an Import stranded at clean with none planned", async () => {
+    // Crash shape: stage flipped to clean but planning never ran (the seam
+    // predates the planner).
+    const imp = await seedImport(db, {
+      status: "running",
+      stage: "clean",
+      sheetHeader: ["Preis"],
+    })
+    await seedSheetRows(imp.id, [["9,99"]])
+
+    const worker = createWorker({
+      db,
+      handlers: defineHandlers({ clean: createCleanHandler() }),
+      planners: { clean: planCleanStage },
+      config: resolveConfig({
+        workerId: "w-sweep-plan",
+        claimIntervalMs: 10,
+        heartbeatIntervalMs: 50,
+        sweepIntervalMs: 25,
+        leaseTtlMs: 2_000,
+        batchSize: 10,
+      }),
+    })
+    worker.start()
+    try {
+      // Planned by the sweeper, executed by the claim loop, advanced by the
+      // completion transaction — the whole chain, unattended.
+      await waitFor("import cleaned and advanced", async () => {
+        const rows = (await db.db.execute(sql`
+          SELECT stage FROM imports WHERE id = ${imp.id}
+        `)) as unknown as Array<{ stage: string }>
+        return rows[0]?.stage === "group"
+      })
+      const cleaned = (await db.db.execute(sql`
+        SELECT values FROM cleaned_rows WHERE import_id = ${imp.id}
+      `)) as unknown as Array<{ values: Array<CleanedCell | null> }>
+      expect(cleaned[0]?.values?.[0]).toMatchObject({
+        kind: "price",
+        cents: 999,
+      })
+    } finally {
+      await worker.stop()
+    }
+  })
+})
+
+describe("intake → clean seam", () => {
+  it("runs the full pipeline: adoption, intake, planned clean chunks, advancement — raw rows untouched", async () => {
+    const storage = testStorage()
+    const cache = testCache()
+    const imp = await seedImport(db, { status: "queued" })
+    await putTestObject(
+      storage,
+      imp.sheetObjectKey,
+      csvBytes([
+        ["SKU", "Preis"],
+        ["A-1", "12,50"],
+        ["A-2", "9,99"],
+      ])
+    )
+
+    const worker = createWorker({
+      db,
+      handlers: defineHandlers({
+        intake: createIntakeHandler({
+          storage,
+          cache,
+          planNextStage: planCleanStage,
+        }),
+        clean: createCleanHandler(),
+      }),
+      cache,
+      planners: { clean: planCleanStage },
+      config: resolveConfig({
+        workerId: "w-full-pipeline",
+        claimIntervalMs: 10,
+        heartbeatIntervalMs: 50,
+        sweepIntervalMs: 25,
+        leaseTtlMs: 2_000,
+        batchSize: 10,
+      }),
+    })
+    worker.start()
+    try {
+      await waitFor("pipeline reached group", async () => {
+        const rows = (await db.db.execute(sql`
+          SELECT stage, row_count FROM imports WHERE id = ${imp.id}
+        `)) as unknown as Array<{ stage: string; row_count: number | null }>
+        return rows[0]?.stage === "group" && rows[0]?.row_count === 2
+      })
+
+      // Raw rows stayed byte-identical through cleaning.
+      const raws = (await db.db.execute(sql`
+        SELECT row_index, raw FROM sheet_rows
+        WHERE import_id = ${imp.id} ORDER BY row_index
+      `)) as unknown as Array<{ row_index: number; raw: unknown[] }>
+      expect(raws.map((r) => r.raw)).toEqual([
+        ["A-1", "12,50"],
+        ["A-2", "9,99"],
+      ])
+
+      // The cleaned projection landed with de prices in integer cents.
+      const cleaned = (await db.db.execute(sql`
+        SELECT values FROM cleaned_rows
+        WHERE import_id = ${imp.id} ORDER BY row_index
+      `)) as unknown as Array<{ values: Array<CleanedCell | null> }>
+      expect(cleaned[0]?.values?.[1]).toEqual({
+        kind: "price",
+        cents: 1250,
+        currency: "EUR",
+      })
+      expect(cleaned[1]?.values?.[1]).toEqual({
+        kind: "price",
+        cents: 999,
+        currency: "EUR",
+      })
+    } finally {
+      await worker.stop()
+      await cache.close()
+    }
   })
 })

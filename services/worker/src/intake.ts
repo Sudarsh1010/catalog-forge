@@ -25,6 +25,7 @@ import { createLogger } from "@workspace/log"
 
 import { publishImportEvent } from "./events"
 import { failImport, completeIntake } from "./imports"
+import type { StagePlanner } from "./stages"
 import type { JobContext, JobHandler } from "./handlers"
 import { IntakeError } from "./intake/errors"
 import { parseCsvStream, type SheetRowEvent } from "./intake/csv"
@@ -46,6 +47,13 @@ export interface IntakeDeps {
   cache: Cache
   /** Overrides on top of {@link DEFAULT_LIMITS}; tests tighten caps with this. */
   limits?: Partial<Limits>
+  /**
+   * Planner for the Stage that follows intake (ADR-0002 plan-then-execute):
+   * called inside the completion transaction that advances the Import, so
+   * the next Stage's Jobs exist the moment the stage value flips. Intake
+   * stays stage-agnostic — the entrypoint wires the seam.
+   */
+  planNextStage?: StagePlanner
 }
 
 interface ImportRecord {
@@ -257,7 +265,13 @@ export function createIntakeHandler(deps: IntakeDeps): JobHandler {
 
       // 2. Advance the Stage machinery (idempotent guard: only the run that
       //    finds stage='intake' advances and publishes).
-      const advancedTo = await completeIntake(db, imp.id, header, rowCount)
+      const advancedTo = await completeIntake(
+        db,
+        imp.id,
+        header,
+        rowCount,
+        deps.planNextStage
+      )
       if (advancedTo) {
         await publishImportEvent(deps.cache, {
           importId: imp.id,

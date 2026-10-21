@@ -18,7 +18,8 @@ import { publishImportEvent } from "./events"
 import type { WorkerConfig } from "./config"
 import { resolveConfig } from "./config"
 import type { HandlerRegistry } from "./handlers"
-import { adoptQueuedImports } from "./imports"
+import { adoptQueuedImports, sweepStalledStageAdvances } from "./imports"
+import type { StagePlannerRegistry } from "./stages"
 import type { ClaimedJob } from "./jobs"
 import {
   claimJob,
@@ -50,6 +51,12 @@ export interface CreateWorkerOptions {
    * the Import-level events (stage_changed, import_done).
    */
   cache?: Cache
+  /**
+   * Stage planners (ADR-0002 plan-then-execute): invoked inside the
+   * completion transaction that advances the Import, so the next Stage's
+   * Jobs are planned the moment its stage value flips.
+   */
+  planners?: StagePlannerRegistry
 }
 
 /** Reassemble a full Job row around a claim (lease fields reflect the claim). */
@@ -87,7 +94,12 @@ export function createWorker(options: CreateWorkerOptions): WorkerHandle {
     }
     try {
       await handler({ job: asJob(claimed, config.workerId), db: db.db, log })
-      await completeJob(db.db, config, claimed.id)
+      const { advancedTo } = await completeJob(
+        db.db,
+        config,
+        claimed.id,
+        options.planners
+      )
       if (options.cache) {
         await publishImportEvent(options.cache, {
           importId: claimed.importId,
@@ -98,11 +110,23 @@ export function createWorker(options: CreateWorkerOptions): WorkerHandle {
             batchKey: claimed.batchKey,
           },
         })
+        if (advancedTo) {
+          await publishImportEvent(options.cache, {
+            importId: claimed.importId,
+            type: "stage_changed",
+            data: {
+              importId: claimed.importId,
+              from: claimed.stage,
+              to: advancedTo,
+            },
+          })
+        }
       }
       log.info(`job completed`, {
         stage: claimed.stage,
         batchKey: claimed.batchKey,
         workerId: config.workerId,
+        advancedTo,
       })
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
@@ -159,6 +183,26 @@ export function createWorker(options: CreateWorkerOptions): WorkerHandle {
         count: ids.length,
         workerId: config.workerId,
       })
+    }
+    // Safety net, part 3: advance Imports stranded mid-Stage and plan the
+    // next Stage's Jobs (ADR-0002's self-healing sweeper).
+    const advanced = await sweepStalledStageAdvances(db.db, options.planners)
+    for (const advance of advanced) {
+      log.info(`sweeper advanced stalled stage`, {
+        ...advance,
+        workerId: config.workerId,
+      })
+      if (options.cache) {
+        await publishImportEvent(options.cache, {
+          importId: advance.importId,
+          type: "stage_changed",
+          data: {
+            importId: advance.importId,
+            from: advance.from,
+            to: advance.to,
+          },
+        })
+      }
     }
   }
 
