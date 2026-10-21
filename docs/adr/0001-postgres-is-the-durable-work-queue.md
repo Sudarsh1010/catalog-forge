@@ -16,7 +16,7 @@ stream from its last-seen ID.
 
 - **Redis Streams consumer groups as the work queue** — rejected: durability
   then depends on Redis persistence and stream retention; "resume after
-  restart" becomes *trust the stream* instead of *read a table*. At our scale
+  restart" becomes _trust the stream_ instead of _read a table_. At our scale
   (10k rows per import) Postgres is nowhere near its limit.
 - **Both as queues** — rejected: two sources of truth for the same jobs means
   dual-write reconciliation, which is exactly how work gets lost or doubled.

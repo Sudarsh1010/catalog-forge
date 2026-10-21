@@ -7,8 +7,8 @@ status: accepted
 The storefront must stay fast while large imports run, and products still under
 review must never appear to shoppers. We decided approval writes a Publication:
 a denormalized, render-ready, per-locale snapshot of a Product. Storefront
-queries touch only Publications — under-review products are invisible *by
-construction*, and import-time writes never contend with shopper reads.
+queries touch only Publications — under-review products are invisible _by
+construction_, and import-time writes never contend with shopper reads.
 
 ## Considered options
 
