@@ -23,6 +23,7 @@
     "coverage",
     "pnpm-lock.yaml",
     ".pnpm-store",
-    ".agents"
+    ".agents",
+    "routeTree.gen.ts"
   ]
 }
