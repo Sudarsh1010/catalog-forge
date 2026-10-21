@@ -28,8 +28,11 @@ export function useImportEvents(
   importId: string | undefined,
   listener: Listener
 ): void {
-  const listenerRef = useRef(listener)
-  listenerRef.current = listener
+  const listenerRef = useRef<Listener>(listener)
+
+  useEffect(() => {
+    listenerRef.current = listener
+  })
 
   useEffect(() => {
     if (!importId) return

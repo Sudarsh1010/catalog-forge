@@ -10,7 +10,6 @@ import { createHash } from "node:crypto"
 import { type Readable, Transform } from "node:stream"
 
 import { Upload } from "@aws-sdk/lib-storage"
-import busboy from "busboy"
 
 import type { Limits } from "@workspace/pipeline"
 import type { Storage } from "@workspace/storage"
@@ -54,7 +53,13 @@ function hasExtension(
 /** Strip path components and control characters from a client filename. */
 export function safeFilename(filename: string): string {
   const base = filename.split(/[\\/]/).pop() ?? "upload"
-  const cleaned = base.replace(/[\0-\x1f\x7f]/g, "").trim()
+  const cleaned = [...base]
+    .filter((char) => {
+      const code = char.charCodeAt(0)
+      return code > 31 && code !== 127
+    })
+    .join("")
+    .trim()
   return cleaned.length > 0 ? cleaned.slice(0, 180) : "upload"
 }
 
