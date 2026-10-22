@@ -23,7 +23,6 @@ import { readdirSync, readFileSync } from "node:fs"
 import Yazl from "yazl"
 import { parse } from "csv-parse"
 import { sql } from "drizzle-orm"
-import postgres from "postgres"
 
 import {
   createWorker,
@@ -91,23 +90,14 @@ interface GoldLabels {
   parkedPhotos: string[]
 }
 
-interface Row<T> extends Array<T> {}
-
-async function query<T>(database: unknown, text: string): Promise<T[]> {
-  return (database as Row<T>).execute(sql.raw(text)) as unknown as Promise<T[]>
-}
-
-/** Fold a supplier code the way the pipeline's identity key does. */
-function foldSku(sku: string): string {
-  return identityKey(sku)
-}
-
-function variantFoldKey(v: GoldVariant): string {
-  if (v.sku !== null) return `sku:${foldSku(v.sku)}`
-  const attrs = Object.entries(v.attributes ?? {}).sort((a, b) =>
-    a[0] < b[0] ? -1 : 1
-  )
-  return `attrs:${attrs.map(([k, val]) => `${identityKey(k)}=${identityKey(val)}`).join("|")}`
+/** Run one raw read-only query against the eval database. */
+async function query<T>(
+  database: {
+    db: { execute: (query: ReturnType<typeof sql.raw>) => Promise<unknown> }
+  },
+  text: string
+): Promise<T[]> {
+  return (await database.db.execute(sql.raw(text))) as T[]
 }
 
 /** Wait for a DB condition or fail with a useful message. */
@@ -362,7 +352,9 @@ async function main(): Promise<void> {
         priceTotal += 1
         const candidate = predicted.find((pv) => {
           if (gv.sku !== null) {
-            return pv.sku !== null && foldSku(pv.sku) === foldSku(gv.sku)
+            return (
+              pv.sku !== null && identityKey(pv.sku) === identityKey(gv.sku)
+            )
           }
           const colour = gv.attributes?.["Farbe"]
           return (
@@ -481,6 +473,32 @@ async function main(): Promise<void> {
         ? "n/a"
         : `${((100 * hit) / total).toFixed(1)}% (${hit}/${total})`
 
+    const scores: Record<string, [number, number]> = {
+      grouping: [groupingHit, gold.products.length],
+      dedupe: [dedupeHit, gold.products.length],
+      price: [priceHit, priceTotal],
+      units: [unitHit, unitTotal],
+      photos: [photoHit, photoTotal],
+      review: [reviewHit, reviewTotal],
+    }
+
+    // CI gate: the recorded baseline (eval/thresholds.json) is the floor.
+    // A regression on any Layer 1 field fails the run.
+    const thresholds = JSON.parse(
+      readFileSync(path.join(EVAL_DIR, "thresholds.json"), "utf8")
+    ) as Record<string, { hit: number; total: number }>
+    let regressed = false
+    for (const [field, [hit, total]] of Object.entries(scores)) {
+      const floor = thresholds[field]
+      if (floor !== undefined && hit < floor.hit) {
+        console.error(
+          `REGRESSION ${field}: ${hit}/${total} below baseline floor ${floor.hit}/${floor.total}`
+        )
+        regressed = true
+      }
+    }
+    if (regressed) process.exitCode = 1
+
     console.log("=== Eval Set — Layer 1 (Demo Mode, keyless) ===")
     console.log(
       `sheet rows: ${cleaned.length}, gold products: ${gold.products.length}, gold variants: ${gold.products.reduce((sum, gp) => sum + gp.variants.length, 0)}`
@@ -512,7 +530,11 @@ async function main(): Promise<void> {
   } finally {
     await cache.close()
     await db.close()
-    await dropEvalDatabase(DATABASE_URL)
+    if (process.env.EVAL_KEEP_DB === undefined) {
+      await dropEvalDatabase(DATABASE_URL)
+    } else {
+      console.log("eval database kept for inspection: catalog_forge_eval")
+    }
   }
 }
 
