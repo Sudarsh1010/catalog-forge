@@ -116,11 +116,12 @@ export async function seedEvalImport(
   await db.db.execute(sql`
     INSERT INTO imports (
       id, store_id, content_hash, original_filename, sheet_format,
-      sheet_object_key, status, stage, sheet_header
+      sheet_object_key, status, stage, sheet_header, family_key
     ) VALUES (
       ${id}, ${storeId}, ${crypto.randomUUID().replaceAll("-", "")}, ${filename},
       'csv', ${sheetObjectKey}, 'queued', 'intake',
-      ${JSON.stringify(options.sheetHeader)}::jsonb
+      ${JSON.stringify(options.sheetHeader)}::jsonb,
+      ${filename.toLowerCase().trim()}
     )
   `)
   return { id, storeId, sheetObjectKey }
