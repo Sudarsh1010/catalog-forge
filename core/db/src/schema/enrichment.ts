@@ -75,7 +75,9 @@ export const productEnrichments = pgTable(
     status: enrichmentStatus("status").notNull(),
     /** Extracted assertions with source pointers; [] — the stub invents none. */
     claims: jsonb("claims")
-      .$type<Array<{ text: string; sourceRowIndex: number }>>()
+      .$type<
+        Array<{ text: string; sourceRowIndex: number; sourceColumn?: string }>
+      >()
       .notNull()
       .default([]),
     /** Why gating flagged the Product; empty when `ready`. */

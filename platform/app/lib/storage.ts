@@ -3,6 +3,8 @@
  * dev hot-reload reuses one client. Environment values live in
  * platform/app/.env.local (copied from the root .env.example).
  */
+import { GetObjectCommand } from "@aws-sdk/client-s3"
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import type { Storage } from "@workspace/storage"
 import { createStorage } from "@workspace/storage"
 
@@ -24,4 +26,18 @@ export function getStorage(): Storage {
     })
   }
   return globalForStorage.__catalogForgeStorage
+}
+
+/**
+ * A short-lived GET URL for one stored object — how the storefront renders
+ * Publication photos without a public bucket (ADR-0005: render-ready reads,
+ * no staging access).
+ */
+export async function presignDownload(objectKey: string): Promise<string> {
+  const storage = getStorage()
+  return getSignedUrl(
+    storage.client,
+    new GetObjectCommand({ Bucket: storage.bucket, Key: objectKey }),
+    { expiresIn: 3600 }
+  )
 }
