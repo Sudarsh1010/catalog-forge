@@ -12,7 +12,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "sheet:generate": "tsx scripts/generate-sheet.ts",
-    "resilience:e2e": "tsx scripts/resilience-e2e.ts"
+    "resilience:e2e": "tsx scripts/resilience-e2e.ts",
+    "load:storefront": "tsx scripts/storefront-load.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.928.0",
@@ -29,10 +30,12 @@
     "yauzl": "^3.2.0"
   },
   "devDependencies": {
+    "@types/autocannon": "^7.12.7",
     "@types/node": "^20",
     "@types/yauzl": "^2.10.3",
     "@types/yazl": "^3.3.1",
     "@workspace/typescript-config": "workspace:*",
+    "autocannon": "^7.15.0",
     "tsx": "^4.23.15",
     "typescript": "^5",
     "vitest": "^3.2.7",
