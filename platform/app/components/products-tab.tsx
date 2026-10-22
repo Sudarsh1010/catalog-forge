@@ -19,7 +19,7 @@ import { PRODUCT_PAGE_SIZES, type ProductStatus } from "@workspace/contracts"
 
 import { Alert, AlertDescription } from "@workspace/ui/components/alert"
 import { Badge } from "@workspace/ui/components/badge"
-import { Button } from "@workspace/ui/components/button"
+import { Button, buttonVariants } from "@workspace/ui/components/button"
 import { Checkbox } from "@workspace/ui/components/checkbox"
 import { Skeleton } from "@workspace/ui/components/skeleton"
 import {
@@ -167,6 +167,17 @@ export function ProductsTab(): React.ReactElement {
     [rows, selected]
   )
 
+  // The export download carries the tab's active search/filters (not the
+  // page): the endpoints serve exactly the filtered catalog, in the
+  // table's current sort order.
+  const exportHref = useMemo(() => {
+    const params = new URLSearchParams({ sort, dir })
+    if (search.length > 0) params.set("search", search)
+    if (status !== "all") params.set("status", status)
+    if (confidence !== "all") params.set("confidence", confidence)
+    return `/api/products/export?${params.toString()}`
+  }, [search, status, confidence, sort, dir])
+
   return (
     <div className="flex min-w-0 flex-col gap-3">
       {/* ---------------------------------------------------- toolbar */}
@@ -233,6 +244,20 @@ export function ProductsTab(): React.ReactElement {
             ? "Approving…"
             : `Approve selected (${approvedSelection > 0 ? approvedSelection : selected.size})`}
         </Button>
+        <a
+          className={buttonVariants({ variant: "outline", size: "xs" })}
+          href={`${exportHref}/csv`}
+          title="Downloads every product matching the current filters (not just this page)"
+        >
+          Export CSV
+        </a>
+        <a
+          className={buttonVariants({ variant: "outline", size: "xs" })}
+          href={`${exportHref}/json`}
+          title="Downloads every product matching the current filters (not just this page)"
+        >
+          Export JSON
+        </a>
       </div>
 
       {bulkError ? (

@@ -57,9 +57,12 @@ const STATUS_SQL = sql`
        WHEN e.status IS NULL THEN 'pending'
        ELSE 'ready' END`
 
-export interface ProductListQuery {
-  page: number
-  pageSize: number
+/**
+ * Search, filter and sort options of the catalog — shared by the paginated
+ * table (product.list) and the CSV/JSON export routes (ticket #18), so an
+ * export is exactly the tab's filtered view without pagination.
+ */
+export interface ProductCatalogQuery {
   sort: "title" | "status" | "confidence" | "messiness" | "updatedAt"
   dir: "asc" | "desc"
   search?: string | undefined
@@ -68,18 +71,21 @@ export interface ProductListQuery {
   importId?: string | undefined
 }
 
-/**
- * The catalog table query: one statement computes every row's derived
- * status, weakest-field confidence and counts, then filters, sorts and
- * paginates server-side; the total rides on a window function so paging
- * never needs a second count scan.
- */
-export async function loadProductList(
-  db: SqlExecutor,
-  query: ProductListQuery
-): Promise<ProductListResult> {
-  const offset = (query.page - 1) * query.pageSize
+export interface ProductListQuery extends ProductCatalogQuery {
+  page: number
+  pageSize: number
+}
 
+/**
+ * The identity-free filter layer of the catalog query, built once and
+ * reused by list and export: `where` scopes the base CTE (search, Import),
+ * `having` filters the derived columns Postgres WHERE cannot see (review
+ * status, weakest-field Confidence).
+ */
+function catalogFilters(query: ProductCatalogQuery): {
+  where: SQL
+  having: SQL
+} {
   const conditions = [sql`TRUE`]
   if (query.search !== undefined && query.search.trim().length > 0) {
     const like = `%${query.search.trim().replace(/[\\%_]/g, "\\$&")}%`
@@ -120,38 +126,35 @@ export async function loadProductList(
     if (query.confidence === "high")
       derived.push(sql`min_confidence >= ${CONFIDENCE_HIGH_FROM}`)
   }
-  const having = sql.join(derived, sql` AND `)
+  return { where, having: sql.join(derived, sql` AND `) }
+}
 
+/**
+ * The ORDER BY suffix shared by list and export: the chosen column, with
+ * `id` as the deterministic tie-break.
+ */
+function catalogOrderBy(query: ProductCatalogQuery): SQL {
   const dir = query.dir === "asc" ? sql`ASC` : sql`DESC`
-  const sortKeys: Record<ProductListQuery["sort"], SQL> = {
+  const sortKeys: Record<ProductCatalogQuery["sort"], SQL> = {
     title: sql`COALESCE(enriched_title, source_title) ${dir}`,
     status: sql`status ${dir}`,
     confidence: sql`min_confidence ${dir} NULLS LAST`,
     messiness: sql`messiness ${dir} NULLS LAST`,
     updatedAt: sql`updated_at ${dir}`,
   }
+  return sql`${sortKeys[query.sort]}, id`
+}
 
-  const rows = rowsOf<{
-    id: string
-    import_id: string
-    import_filename: string
-    natural_key: string
-    source_title: string
-    enriched_title: string | null
-    handle: string | null
-    status: string
-    reason_list: string[]
-    confidence: Record<string, number> | null
-    min_confidence: number | null
-    messiness: number | null
-    row_indexes: number[]
-    photo_count: number
-    edited_by_merchant: boolean
-    published_locales: string[] | null
-    total: number
-    updated_at: Date | string
-  }>(
-    await db.execute(sql`
+/**
+ * The catalog query: one statement computes every row's derived status,
+ * weakest-field confidence and counts, then filters and sorts; the total
+ * rides on a window function so paging never needs a second count scan.
+ * `tail` is the paging suffix — LIMIT/OFFSET for the table, empty for the
+ * export, which takes every matching row.
+ */
+function catalogQuerySql(query: ProductCatalogQuery, tail: SQL): SQL {
+  const { where, having } = catalogFilters(query)
+  return sql`
       WITH base AS (
         SELECT p.id, p.import_id, p.needs_review,
                p.updated_at, p.title AS source_title,
@@ -187,12 +190,34 @@ export async function loadProductList(
                THEN source_row_indexes ELSE '[]'::jsonb END)), '{}') AS row_indexes,
         (count(*) OVER ())::int AS total
       FROM filtered
-      ORDER BY ${sortKeys[query.sort]}, id
-      LIMIT ${query.pageSize} OFFSET ${offset}
-    `)
-  )
+      ORDER BY ${catalogOrderBy(query)}${tail}`
+}
 
-  const listRows: ProductListRow[] = rows.map((row) => ({
+/** One raw catalog row: the snake_case SQL projection before DTO coercion. */
+type CatalogRawRow = {
+  id: string
+  import_id: string
+  import_filename: string
+  natural_key: string
+  source_title: string
+  enriched_title: string | null
+  handle: string | null
+  status: string
+  reason_list: string[]
+  confidence: Record<string, number> | null
+  min_confidence: number | null
+  messiness: number | null
+  row_indexes: number[]
+  photo_count: number
+  edited_by_merchant: boolean
+  published_locales: string[] | null
+  total: number
+  updated_at: Date | string
+}
+
+/** The shared list DTO, coerced from one raw row. */
+function toListRow(row: CatalogRawRow): ProductListRow {
+  return {
     id: row.id,
     importId: row.import_id,
     importFilename: row.import_filename,
@@ -209,13 +234,49 @@ export async function loadProductList(
     editedByMerchant: row.edited_by_merchant,
     publishedLocales: (row.published_locales ?? []).sort(),
     updatedAt: toIso(row.updated_at)!,
-  }))
+  }
+}
+
+/**
+ * The catalog table (user story 20): the shared catalog query with
+ * server-side pagination 10/25/50/100.
+ */
+export async function loadProductList(
+  db: SqlExecutor,
+  query: ProductListQuery
+): Promise<ProductListResult> {
+  const rows = rowsOf<CatalogRawRow>(
+    await db.execute(
+      catalogQuerySql(
+        query,
+        sql` LIMIT ${query.pageSize} OFFSET ${
+          (query.page - 1) * query.pageSize
+        }`
+      )
+    )
+  )
   return {
-    rows: listRows,
+    rows: rows.map(toListRow),
     total: rows[0]?.total ?? 0,
     page: query.page,
     pageSize: query.pageSize,
   }
+}
+
+/**
+ * Every Product matching the tab's filters, in the tab's current sort
+ * order — the CSV/JSON export routes (ticket #18). Runs the catalog query
+ * verbatim minus the paging suffix, so an export contains exactly the
+ * rows product.list shows for the same search/filters, unpaged.
+ */
+export async function loadProductExport(
+  db: SqlExecutor,
+  query: ProductCatalogQuery
+): Promise<ProductListRow[]> {
+  const rows = rowsOf<CatalogRawRow>(
+    await db.execute(catalogQuerySql(query, sql``))
+  )
+  return rows.map(toListRow)
 }
 
 /**

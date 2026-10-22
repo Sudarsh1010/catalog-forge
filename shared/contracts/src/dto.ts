@@ -165,28 +165,30 @@ export const ProductPageSizeSchema = z
   )
 
 /** Sort keys; `title` falls back to the grouping title pre-enrichment. */
-export const ProductSortSchema = z.enum([
+export const PRODUCT_SORTS = [
   "title",
   "status",
   "confidence",
   "messiness",
   "updatedAt",
-])
+] as const
+export const ProductSortSchema = z.enum(PRODUCT_SORTS)
 export type ProductSort = z.infer<typeof ProductSortSchema>
 
 /** Derived review state of one Product. `pending` = not enriched yet. */
-export const ProductStatusSchema = z.enum([
+export const PRODUCT_STATUSES = [
   "approved",
   "needs_review",
   "ready",
   "pending",
-])
+] as const
+export const ProductStatusSchema = z.enum(PRODUCT_STATUSES)
 export type ProductStatus = z.infer<typeof ProductStatusSchema>
 
-export const ProductStatusFilterSchema = z.enum([
-  "all",
-  ...ProductStatusSchema.options,
-])
+/** Status filter values: every derived state plus `all`. */
+export const PRODUCT_STATUS_FILTERS = ["all", ...PRODUCT_STATUSES] as const
+export const ProductStatusFilterSchema = z.enum(PRODUCT_STATUS_FILTERS)
+export type ProductStatusFilter = z.infer<typeof ProductStatusFilterSchema>
 
 /**
  * Confidence buckets (GLOSSARY: Confidence 0–100). The boundaries are the
@@ -195,12 +197,16 @@ export const ProductStatusFilterSchema = z.enum([
  */
 export const CONFIDENCE_LOW_BELOW = 70
 export const CONFIDENCE_HIGH_FROM = 90
-export const ProductConfidenceFilterSchema = z.enum([
+export const PRODUCT_CONFIDENCE_FILTERS = [
   "all",
   "low",
   "medium",
   "high",
-])
+] as const
+export const ProductConfidenceFilterSchema = z.enum(PRODUCT_CONFIDENCE_FILTERS)
+export type ProductConfidenceFilter = z.infer<
+  typeof ProductConfidenceFilterSchema
+>
 
 /** One Products-tab row: the review surface's list projection. */
 export const ProductListRowSchema = z.object({

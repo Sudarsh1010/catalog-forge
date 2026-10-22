@@ -559,6 +559,262 @@ describe("product.list (the review tab table)", () => {
   })
 })
 
+describe("product export routes (CSV and JSON downloads)", () => {
+  /**
+   * Minimal RFC 4180 parser (quotes, escaped quotes, CR/LF): re-parses
+   * the downloaded bytes independently of the server's writer.
+   */
+  function parseCsv(text: string): string[][] {
+    const rows: string[][] = []
+    let row: string[] = []
+    let cell = ""
+    let inQuotes = false
+    let index = 0
+    while (index < text.length) {
+      const char = text[index]!
+      if (inQuotes) {
+        if (char === '"') {
+          if (text[index + 1] === '"') {
+            cell += '"'
+            index += 2
+          } else {
+            inQuotes = false
+            index += 1
+          }
+        } else {
+          cell += char
+          index += 1
+        }
+      } else if (char === '"') {
+        inQuotes = true
+        index += 1
+      } else if (char === ",") {
+        row.push(cell)
+        cell = ""
+        index += 1
+      } else if (char === "\n" || char === "\r") {
+        if (char === "\r" && text[index + 1] === "\n") index += 1
+        row.push(cell)
+        rows.push(row)
+        row = []
+        cell = ""
+        index += 1
+      } else {
+        cell += char
+        index += 1
+      }
+    }
+    if (cell.length > 0 || row.length > 0) {
+      row.push(cell)
+      rows.push(row)
+    }
+    return rows
+  }
+
+  const EXPORT_CSV_HEADERS = [
+    "id",
+    "importId",
+    "importFilename",
+    "naturalKey",
+    "title",
+    "handle",
+    "status",
+    "reviewReasons",
+    "confidence",
+    "minConfidence",
+    "messiness",
+    "sourceRowCount",
+    "photoCount",
+    "editedByMerchant",
+    "publishedLocales",
+    "updatedAt",
+  ]
+
+  const columnOf = new Map(
+    EXPORT_CSV_HEADERS.map((header, index) => [header, index])
+  )
+  const cellOf = (cells: string[], header: string): string =>
+    cells[columnOf.get(header)!]!
+
+  /**
+   * The catalog plus one row whose title forces full CSV escaping
+   * (comma, double quotes, line break) and non-ASCII text.
+   */
+  async function seedCatalogWithEscapedTitle(): Promise<{ escaped: string }> {
+    const { importId } = await seedCatalog()
+    const escaped = await seedProduct(importId, "sku:escape-1")
+    await seedEnrichment(importId, escaped, {
+      title: 'Ünïcode, "quoted"\ntitle — ✓',
+      handle: "escape-1",
+      confidence: HIGH_CONFIDENCE,
+    })
+    return { escaped }
+  }
+
+  it("downloads CSV as an attachment with exactly the tab's rows", async () => {
+    const { escaped } = await seedCatalogWithEscapedTitle()
+    const response = await fetch(`${app.baseUrl}/api/products/export/csv`)
+    expect(response.status).toBe(200)
+    expect(response.headers.get("content-type")).toBe("text/csv; charset=utf-8")
+    const disposition = response.headers.get("content-disposition") ?? ""
+    expect(disposition.startsWith("attachment;")).toBe(true)
+    expect(disposition).toMatch(
+      /filename="catalog-export-\d{4}-\d{2}-\d{2}\.csv"/
+    )
+
+    // `response.text()` strips a leading BOM (WHATWG decode), so assert
+    // the raw bytes: UTF-8 BOM (EF BB BF) keeps spreadsheet applications
+    // decoding the non-ASCII text correctly.
+    const bytes = new Uint8Array(await response.arrayBuffer())
+    expect(bytes[0]).toBe(0xef)
+    expect(bytes[1]).toBe(0xbb)
+    expect(bytes[2]).toBe(0xbf)
+    const table = parseCsv(new TextDecoder("utf-8").decode(bytes.subarray(3)))
+    expect(table[0]).toEqual(EXPORT_CSV_HEADERS)
+    const dataRows = table.slice(1)
+    expect(dataRows).toHaveLength(13)
+    // No cell leaked past its quotes into a phantom column.
+    expect(
+      dataRows.every((cells) => cells.length === EXPORT_CSV_HEADERS.length)
+    ).toBe(true)
+
+    // What the tab shows for the same (default) filters — the comparison
+    // baseline for "exactly the visible products".
+    const visible = await client.product.list({
+      page: 1,
+      pageSize: 100,
+      sort: "updatedAt",
+      dir: "desc",
+      status: "all",
+      confidence: "all",
+    })
+    const visibleById = new Map(visible.rows.map((row) => [row.id, row]))
+    expect(visibleById.size).toBe(13)
+    for (const cells of dataRows) {
+      const row = visibleById.get(cellOf(cells, "id"))
+      expect(row).toBeDefined()
+      expect(cellOf(cells, "title")).toBe(row!.title)
+      expect(cellOf(cells, "handle")).toBe(row!.handle ?? "")
+      expect(cellOf(cells, "naturalKey")).toBe(row!.naturalKey)
+      expect(cellOf(cells, "status")).toBe(row!.status)
+      expect(JSON.parse(cellOf(cells, "reviewReasons")!)).toEqual(
+        row!.reviewReasons
+      )
+      expect(JSON.parse(cellOf(cells, "confidence")!)).toEqual(row!.confidence)
+      expect(cellOf(cells, "minConfidence")).toBe(
+        row!.minConfidence === null ? "" : String(row!.minConfidence)
+      )
+      expect(cellOf(cells, "messiness")).toBe(
+        row!.messiness === null ? "" : String(row!.messiness)
+      )
+      expect(cellOf(cells, "editedByMerchant")).toBe(
+        String(row!.editedByMerchant)
+      )
+      expect(JSON.parse(cellOf(cells, "publishedLocales")!)).toEqual(
+        row!.publishedLocales
+      )
+      expect(cellOf(cells, "updatedAt")).toBe(row!.updatedAt)
+    }
+
+    // The escaping round-trip: comma, double quotes, line break, Unicode.
+    const escapedCells = dataRows.find(
+      (cells) => cellOf(cells, "id") === escaped
+    )!
+    expect(escapedCells).toBeDefined()
+    expect(cellOf(escapedCells, "title")).toBe('Ünïcode, "quoted"\ntitle — ✓')
+  })
+
+  it("downloads JSON that parses to exactly the visible rows", async () => {
+    await seedCatalogWithEscapedTitle()
+    const response = await fetch(`${app.baseUrl}/api/products/export/json`)
+    expect(response.status).toBe(200)
+    expect(response.headers.get("content-type")).toBe(
+      "application/json; charset=utf-8"
+    )
+    expect(
+      (response.headers.get("content-disposition") ?? "").startsWith(
+        "attachment;"
+      )
+    ).toBe(true)
+
+    // The export route's JSON payload: an array of the list DTOs.
+    const exported = (await response.json()) as Array<{ id: string }>
+    expect(Array.isArray(exported)).toBe(true)
+    expect(exported).toHaveLength(13)
+
+    const visible = await client.product.list({
+      page: 1,
+      pageSize: 100,
+      sort: "updatedAt",
+      dir: "desc",
+      status: "all",
+      confidence: "all",
+    })
+    const byId = (a: { id: string }, b: { id: string }): number =>
+      a.id.localeCompare(b.id)
+    expect([...exported].sort(byId)).toEqual([...visible.rows].sort(byId))
+  })
+
+  it("honours search, status and confidence filters in both formats", async () => {
+    const { low, high, priced } = await seedCatalog()
+
+    // Combined filters: the one needs-review, low-confidence product whose
+    // title matches the search.
+    const query = "status=needs_review&confidence=low&search=blumentopf"
+    const csvResponse = await fetch(
+      `${app.baseUrl}/api/products/export/csv?${query}`
+    )
+    const table = parseCsv((await csvResponse.text()).slice(1))
+    expect(table).toHaveLength(2)
+    expect(cellOf(table[1]!, "id")).toBe(low)
+    expect(cellOf(table[1]!, "naturalKey")).toBe("sku:low-1")
+    expect(cellOf(table[1]!, "status")).toBe("needs_review")
+
+    const jsonResponse = await fetch(
+      `${app.baseUrl}/api/products/export/json?${query}`
+    )
+    // The export route's JSON payload: an array of the list DTOs.
+    const filtered = (await jsonResponse.json()) as Array<{ id: string }>
+    expect(filtered.map((row) => row.id)).toEqual([low])
+
+    // Search plus sort: the export keeps the table's order.
+    const searched = await fetch(
+      `${app.baseUrl}/api/products/export/json?search=${encodeURIComponent("gießkanne")}&sort=title&dir=asc`
+    )
+    // The export route's JSON payload: an array of the list DTOs.
+    const searchRows = (await searched.json()) as Array<{
+      id: string
+      title: string
+    }>
+    expect(searchRows.map((row) => row.id)).toEqual([high, priced])
+    expect(searchRows.map((row) => row.title)).toEqual([
+      "Brunner Gießkanne 5L",
+      "Gießkanne priced",
+    ])
+  })
+
+  it("rejects unknown formats and invalid filters", async () => {
+    const notFound = await fetch(`${app.baseUrl}/api/products/export/xml`)
+    expect(notFound.status).toBe(404)
+
+    await seedCatalog()
+    const badStatus = await fetch(
+      `${app.baseUrl}/api/products/export/csv?status=bogus`
+    )
+    expect(badStatus.status).toBe(400)
+    // The plain routes' fixed error shape: { error: { message, code } }.
+    const badStatusBody = (await badStatus.json()) as {
+      error: { code: string }
+    }
+    expect(badStatusBody.error.code).toBe("INVALID_EXPORT_QUERY")
+
+    const badImportId = await fetch(
+      `${app.baseUrl}/api/products/export/json?importId=nope`
+    )
+    expect(badImportId.status).toBe(400)
+  })
+})
+
 describe("product.detail (the side-by-side hydration)", () => {
   it("returns source rows, photos and variants next to the AI result with claim pointers", async () => {
     const { priced, low } = await seedCatalog()
