@@ -14,7 +14,8 @@
     "sheet:generate": "tsx scripts/generate-sheet.ts",
     "resilience:e2e": "tsx scripts/resilience-e2e.ts",
     "eval:l1": "tsx scripts/eval-score.ts",
-    "eval:l2": "tsx scripts/eval-score-l2.ts"
+    "eval:l2": "tsx scripts/eval-score-l2.ts",
+    "load:storefront": "tsx scripts/storefront-load.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.99",
@@ -34,10 +35,12 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@types/autocannon": "^7.12.7",
     "@types/node": "^20",
     "@types/yauzl": "^2.10.3",
     "@types/yazl": "^3.3.1",
     "@workspace/typescript-config": "workspace:*",
+    "autocannon": "^7.15.0",
     "tsx": "^4.23.15",
     "typescript": "^5",
     "vitest": "^3.2.7",
