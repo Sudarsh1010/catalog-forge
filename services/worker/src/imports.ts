@@ -134,7 +134,7 @@ export async function sweepStalledStageAdvances(
   const stalled = rowsOf<{ id: string; store_id: string; stage: string }>(
     await db.execute(sql`
       SELECT i.id, i.store_id, i.stage FROM imports i
-      WHERE i.status = 'running' AND i.stage IN ('intake', 'clean')
+      WHERE i.status = 'running' AND i.stage IN ('intake', 'clean', 'group', 'match-media')
         AND EXISTS (
           SELECT 1 FROM jobs j
           WHERE j.import_id = i.id AND j.stage = i.stage AND j.status = 'completed'
