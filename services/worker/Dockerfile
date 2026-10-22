@@ -2,8 +2,11 @@
 # services (spec: "Runtime shape"). Internal packages ship TS source, so the
 # image runs them through tsx; no build step exists to copy.
 FROM node:22-alpine
-RUN corepack enable
+RUN apk add --no-cache git && corepack enable
 WORKDIR /app
+# `lefthook install` in the root prepare script requires a git repository.
+RUN git init .
+ENV LEFTHOOK=0
 
 # Install workspace dependencies for the worker graph only.
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
