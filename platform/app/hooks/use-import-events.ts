@@ -4,25 +4,34 @@
  * Live per-Import progress over SSE: snapshot first, then stream events.
  * EventSource reconnects automatically and resends Last-Event-ID, so a
  * dropped connection resumes without gaps; the snapshot re-syncs state.
+ *
+ * Stream events arrive as the worker's published envelope
+ * `{ type, at, data }` — the payload fields live under `data`.
  */
 import { useEffect, useRef } from "react"
 
 import type { ImportDto } from "@/lib/imports"
 
-interface ImportEventPayload {
-  importId?: string
-  from?: string
-  to?: string
-  status?: string
-  reason?: string
-  rowCount?: number
+interface ImportEventEnvelope {
+  type?: string
+  at?: string
+  data?: {
+    importId?: string
+    from?: string
+    to?: string
+    status?: string
+    reason?: string
+    providerId?: string
+    resumeAt?: string | null
+  }
 }
 
 type Listener = (patch: Partial<ImportDto>) => void
 
 /**
  * Subscribe to one import's event stream. The listener receives patches
- * derived from SSE events; the initial snapshot patches the full state.
+ * derived from SSE events; the initial snapshot patches the full state
+ * (the detail read model, whose extra fields flow through to the caller).
  */
 export function useImportEvents(
   importId: string | undefined,
@@ -38,13 +47,14 @@ export function useImportEvents(
     if (!importId) return
     const source = new EventSource(`/api/imports/${importId}/events`)
 
-    const applyPayload = (raw: string): void => {
-      let payload: ImportEventPayload
+    const applyEnvelope = (raw: string): void => {
+      let envelope: ImportEventEnvelope
       try {
-        payload = JSON.parse(raw) as ImportEventPayload
+        envelope = JSON.parse(raw) as ImportEventEnvelope
       } catch {
         return
       }
+      const payload = envelope.data ?? {}
       const patch: Partial<ImportDto> = {}
       if (payload.to) patch.stage = payload.to
       if (payload.status === "failed") {
@@ -52,8 +62,12 @@ export function useImportEvents(
         patch.failureReason = payload.reason ?? "The import failed."
       }
       if (payload.status === "completed") patch.status = "completed"
-      if (typeof payload.rowCount === "number")
-        patch.rowCount = payload.rowCount
+      if (payload.resumeAt) {
+        // The `paused` event (GLOSSARY: Pause) — countdown surface.
+        patch.status = "paused"
+        patch.pausedProviderId = payload.providerId ?? null
+        patch.pausedUntil = payload.resumeAt
+      }
       listenerRef.current(patch)
     }
 
@@ -75,7 +89,7 @@ export function useImportEvents(
       "import_done",
     ]) {
       source.addEventListener(type, (event) =>
-        applyPayload((event as MessageEvent<string>).data)
+        applyEnvelope((event as MessageEvent<string>).data)
       )
     }
     return () => {

@@ -8,42 +8,14 @@
 import { useCallback, useEffect, useState } from "react"
 
 import { PIPELINE_STAGES, type Stage } from "@workspace/pipeline"
+import Link from "next/link"
 import { cn } from "@workspace/ui/lib/utils"
 
 import type { ImportDto } from "@/lib/imports"
 
 import { useImportEvents } from "@/hooks/use-import-events"
+import { STAGE_LABELS, STATUS_STYLES } from "./import-labels"
 import { UploadDropzone, type UploadResult } from "./upload-dropzone"
-
-const STAGE_LABELS: Record<Stage, string> = {
-  intake: "Intake",
-  clean: "Clean",
-  group: "Grouping",
-  "match-media": "Photos",
-  enrich: "Enrichment",
-  translate: "Translation",
-  finalise: "Finalising",
-}
-
-const STATUS_STYLES: Record<string, { label: string; className: string }> = {
-  queued: {
-    label: "Queued",
-    className: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-  },
-  running: {
-    label: "Working",
-    className: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
-  },
-  paused: {
-    label: "Paused",
-    className: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-  },
-  completed: {
-    label: "Completed",
-    className: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
-  },
-  failed: { label: "Failed", className: "bg-destructive/15 text-destructive" },
-}
 
 function LiveImport({ imported }: { imported: ImportDto }): React.ReactElement {
   const [current, setCurrent] = useState<ImportDto>(imported)
@@ -66,9 +38,12 @@ function LiveImport({ imported }: { imported: ImportDto }): React.ReactElement {
   return (
     <li className="flex flex-col gap-2 border border-border bg-card px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="min-w-0 flex-1 truncate text-sm font-medium">
+        <Link
+          href={`/imports/${current.id}`}
+          className="min-w-0 flex-1 truncate text-sm font-medium hover:underline"
+        >
           {current.originalFilename}
-        </span>
+        </Link>
         <span
           className={cn(
             "px-1.5 py-0.5 text-[11px] font-medium",

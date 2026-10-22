@@ -183,7 +183,7 @@ export async function startTestApp(): Promise<TestApp> {
 
 export async function truncateTables(db: Db): Promise<void> {
   await db.db.execute(
-    sql`TRUNCATE jobs, imports, sheet_rows, import_files, cleaned_rows, clean_plans CASCADE`
+    sql`TRUNCATE jobs, imports, sheet_rows, import_files, cleaned_rows, clean_plans, reruns CASCADE`
   )
 }
 
