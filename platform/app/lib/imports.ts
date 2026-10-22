@@ -14,6 +14,9 @@ export interface ImportDto {
   sheetFormat: string
   rowCount: number | null
   failureReason: string | null
+  /** Pause surface (GLOSSARY: Pause): "Paused — resuming in X minutes". */
+  pausedProviderId: string | null
+  pausedUntil: string | null
   contentHash: string
   createdAt: string
   updatedAt: string
@@ -29,6 +32,8 @@ export function toImportDto(row: Import): ImportDto {
     sheetFormat: row.sheetFormat,
     rowCount: row.rowCount,
     failureReason: row.failureReason,
+    pausedProviderId: row.pausedProviderId,
+    pausedUntil: row.pausedUntil?.toISOString() ?? null,
     contentHash: row.contentHash,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
