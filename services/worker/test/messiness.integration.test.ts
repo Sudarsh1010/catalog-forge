@@ -57,9 +57,12 @@ async function seedProduct(
 ): Promise<string> {
   const id = crypto.randomUUID()
   await db.db.execute(sql`
-    INSERT INTO products (id, store_id, import_id, identity_kind, natural_key,
-                          natural_key_hash, title, description, category, brand, gtin)
-    VALUES (${id}, 'default', ${importId}, ${options.identityKind ?? "code"},
+    INSERT INTO products (id, store_id, import_id, family_key, identity_kind,
+                          natural_key, natural_key_hash, title, description,
+                          category, brand, gtin)
+    VALUES (${id}, 'default', ${importId},
+            (SELECT family_key FROM imports WHERE id = ${importId}),
+            ${options.identityKind ?? "code"},
             ${"sku:" + id.slice(0, 8)}, ${id}, 'Test ' || ${id.slice(0, 8)},
             ${options.description ?? "desc"}, ${options.category ?? "cat"},
             ${options.brand ?? "brand"}, ${options.gtin ?? "12345678"})
@@ -79,10 +82,11 @@ describe("Messiness Score: SQL fragment and TS implementation agree", () => {
   it("scores plan-time products identically to messinessScore (photo-free)", async () => {
     const importId = crypto.randomUUID()
     await db.db.execute(sql`
-      INSERT INTO imports (id, store_id, content_hash, original_filename,
-                           sheet_format, sheet_object_key, status, stage)
+      INSERT INTO imports (id, store_id, content_hash, family_key,
+                           original_filename, sheet_format, sheet_object_key,
+                           status, stage)
       VALUES (${importId}, 'default', ${crypto.randomUUID()}, 'sheet.csv',
-              'csv', 'k', 'running', 'group')
+              'sheet.csv', 'csv', 'k', 'running', 'group')
     `)
     await seedProduct(importId, { identityKind: "title", brand: null })
     await seedProduct(importId, {

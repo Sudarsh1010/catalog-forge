@@ -65,12 +65,13 @@ async function seedImportRow(options: SeedImportOptions = {}): Promise<string> {
   const id = crypto.randomUUID()
   await db.db.execute(sql`
     INSERT INTO imports (
-      id, store_id, content_hash, original_filename, sheet_format,
+      id, store_id, content_hash, family_key, original_filename, sheet_format,
       sheet_object_key, status, stage, row_count, sheet_header,
       paused_until, paused_provider_id
     ) VALUES (
       ${id}, 'default', ${crypto.randomUUID().replaceAll("-", "")},
-      'supplier-sheet.csv', 'csv', 'imports/default/x/sheet.csv',
+      'supplier-sheet.csv', 'supplier-sheet.csv', 'csv',
+      'imports/default/x/sheet.csv',
       ${options.status ?? "running"}, ${options.stage ?? "enrich"},
       ${options.rowCount ?? null},
       ${JSON.stringify(["SKU", "Title"])}::jsonb,
@@ -104,10 +105,12 @@ async function seedProduct(
   const id = crypto.randomUUID()
   await db.db.execute(sql`
     INSERT INTO products (
-      id, store_id, import_id, identity_kind, natural_key,
+      id, store_id, import_id, family_key, identity_kind, natural_key,
       natural_key_hash, title, needs_review, review_reason
     ) VALUES (
-      ${id}, 'default', ${importId}, 'code', ${naturalKey},
+      ${id}, 'default', ${importId},
+      (SELECT family_key FROM imports WHERE id = ${importId}),
+      'code', ${naturalKey},
       ${keyHash(naturalKey)}, ${`Product ${naturalKey}`}, false, null
     )
   `)

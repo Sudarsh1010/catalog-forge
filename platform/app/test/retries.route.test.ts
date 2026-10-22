@@ -46,10 +46,11 @@ afterAll(async () => {
 async function seedImportRow(): Promise<string> {
   const id = crypto.randomUUID()
   await db.db.execute(sql`
-    INSERT INTO imports (id, store_id, content_hash, original_filename,
-                         sheet_format, sheet_object_key, status, stage)
+    INSERT INTO imports (id, store_id, content_hash, family_key,
+                         original_filename, sheet_format, sheet_object_key,
+                         status, stage)
     VALUES (${id}, 'default', ${crypto.randomUUID()}, 'sheet.csv',
-            'csv', 'imports/default/sheet.csv', 'running', 'enrich')
+            'sheet.csv', 'csv', 'imports/default/sheet.csv', 'running', 'enrich')
   `)
   return id
 }

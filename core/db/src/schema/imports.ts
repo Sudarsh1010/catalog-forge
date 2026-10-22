@@ -32,6 +32,14 @@ export const imports = pgTable(
     storeId: text("store_id").notNull(),
     /** sha256 of the sheet's bytes — the Import's identity for dedupe. */
     contentHash: text("content_hash").notNull(),
+    /**
+     * Sheet lineage for re-import key-diff (GLOSSARY: Missing-from-Source):
+     * the normalized filename (`familyKeyOf`), so a changed re-upload of the
+     * same supplier sheet reconciles with its predecessor's catalog instead
+     * of duplicating it. Distinct filenames stay distinct families (EC-032 —
+     * the same supplier code from two sources stays two Products).
+     */
+    familyKey: text("family_key").notNull(),
     /** What the merchant called the file; display only. */
     originalFilename: text("original_filename").notNull(),
     /** `csv` | `xlsx` — picked by cheap extension validation at upload. */
@@ -71,6 +79,8 @@ export const imports = pgTable(
     uniqueIndex("imports_content_hash_key").on(t.storeId, t.contentHash),
     // Sweeper adoption scan: queued Imports, oldest first.
     index("imports_adoption_idx").on(t.status, t.createdAt),
+    // Key-diff predecessor scan: the family's Imports, newest first.
+    index("imports_family_idx").on(t.storeId, t.familyKey, t.createdAt),
   ]
 )
 
