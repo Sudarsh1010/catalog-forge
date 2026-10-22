@@ -355,10 +355,11 @@ describe("poison Jobs: Failed-with-reason in the ledger, retryable", () => {
     // leave both verdicts (and the Needs Review reason) intact.
     const productId = crypto.randomUUID()
     await db.db.execute(sql`
-      INSERT INTO products (id, store_id, import_id, identity_kind, natural_key,
-                            natural_key_hash, title)
-      VALUES (${productId}, ${imp.storeId}, ${imp.id}, 'code', 'sku:t-1',
-              ${productId}, 'Test 1')
+      INSERT INTO products (id, store_id, import_id, family_key, identity_kind,
+                            natural_key, natural_key_hash, title)
+      VALUES (${productId}, ${imp.storeId}, ${imp.id},
+              (SELECT family_key FROM imports WHERE id = ${imp.id}),
+              'code', 'sku:t-1', ${productId}, 'Test 1')
     `)
     for (const [rowIndex, state, reason] of [
       [1, "needs_review", "Variant price conflicts across rows (EC-021)"],

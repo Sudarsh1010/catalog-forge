@@ -17,6 +17,7 @@ import {
   parkedPhotos,
   productPhotos,
   products,
+  rowLedger,
   variants,
 } from "@workspace/db/schema"
 import { createLogger } from "@workspace/log"
@@ -116,12 +117,20 @@ async function loadPhotos(
     .orderBy(asc(importFiles.createdAt), asc(importFiles.id))
 }
 
+/**
+ * The Import's matchable catalog: the Products its Row Ledger resolved to —
+ * its own grouped Products AND family Products a re-import adopted (whose
+ * birth `import_id` is an earlier Import's). Group completes before
+ * match-media is planned, so the ledger is the complete resolution.
+ */
 async function loadMatchables(
   db: Database,
   importId: string
 ): Promise<MatchableProduct[]> {
+  // DISTINCT: a Product spans many ledger rows; the join fans out, the
+  // distinct row set is exactly (product × its variants).
   const rows = await db
-    .select({
+    .selectDistinct({
       productId: products.id,
       naturalKey: products.naturalKey,
       title: products.title,
@@ -133,8 +142,14 @@ async function loadMatchables(
       attributes: variants.attributes,
     })
     .from(products)
+    .innerJoin(
+      rowLedger,
+      and(
+        eq(rowLedger.productId, products.id),
+        eq(rowLedger.importId, importId)
+      )
+    )
     .leftJoin(variants, eq(variants.productId, products.id))
-    .where(eq(products.importId, importId))
     .orderBy(asc(products.naturalKey), asc(variants.variantKey))
 
   const byProduct = new Map<string, MatchableProduct>()
