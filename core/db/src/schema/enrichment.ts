@@ -88,6 +88,8 @@ export const productEnrichments = pgTable(
       .$type<number[]>()
       .notNull()
       .default([]),
+    /** Messiness Score 0–100 that routed this Product's calls (GLOSSARY). */
+    messiness: integer("messiness").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

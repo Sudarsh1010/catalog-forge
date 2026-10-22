@@ -228,7 +228,14 @@ async function enrichProduct(
     provider.enrich(input)
   )
 
-  await upsertEnrichment(db, storeId, importId, product.id, call.value)
+  await upsertEnrichment(
+    db,
+    storeId,
+    importId,
+    product.id,
+    call.value,
+    input.messiness
+  )
   if (call.value.status === "needs_review") {
     await gateNeedsReview(db, product, call.value.reviewReasons)
   }
@@ -250,7 +257,8 @@ async function upsertEnrichment(
   storeId: string,
   importId: string,
   productId: string,
-  value: EnrichmentResult
+  value: EnrichmentResult,
+  messiness: number
 ): Promise<void> {
   await db
     .insert(productEnrichments)
@@ -269,6 +277,7 @@ async function upsertEnrichment(
       claims: value.claims,
       reviewReasons: value.reviewReasons,
       sourceRowIndexes: value.sourceRows,
+      messiness,
     })
     .onConflictDoUpdate({
       target: productEnrichments.productId,
@@ -284,6 +293,7 @@ async function upsertEnrichment(
         claims: sql`EXCLUDED.claims`,
         reviewReasons: sql`EXCLUDED.review_reasons`,
         sourceRowIndexes: sql`EXCLUDED.source_row_indexes`,
+        messiness: sql`EXCLUDED.messiness`,
         updatedAt: new Date(),
       },
     })

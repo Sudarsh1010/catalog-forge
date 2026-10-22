@@ -90,3 +90,8 @@ export type {
 } from "./provider"
 export { createEnrichHandler, messinessScore } from "./enrich/handler"
 export type { EnrichDeps } from "./enrich/handler"
+export { createTranslateHandler } from "./translate/handler"
+export type { TranslateDeps } from "./translate/handler"
+export { createFinaliseHandler } from "./finalise/handler"
+export type { FinaliseDeps } from "./finalise/handler"
+export { FINALISE_BATCH_KEY, planFinaliseStage } from "./finalise/plan"
