@@ -42,7 +42,8 @@ function formatPrice(
 export default async function StorefrontCollectionPage({
   searchParams,
 }: PageProps<"/storefront">) {
-  const { country } = await searchParams
+  const { country: rawCountry } = await searchParams
+  const country = Array.isArray(rawCountry) ? rawCountry[0] : rawCountry
   const locale = resolveLocale(country)
   const products = await listPublishedProducts(locale)
 
