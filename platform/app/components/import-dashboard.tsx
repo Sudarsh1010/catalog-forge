@@ -19,6 +19,7 @@ import Link from "next/link"
 import { orpc } from "@/lib/orpc"
 import { useImportEvents } from "@/hooks/use-import-events"
 import { STAGE_LABELS, STATUS_STYLES } from "./import-labels"
+import { DashboardNav } from "./dashboard-nav"
 import { UploadDropzone } from "./upload-dropzone"
 
 function LiveImport({ imported }: { imported: ImportDto }): React.ReactElement {
@@ -107,6 +108,7 @@ export function ImportDashboard(): React.ReactElement {
   return (
     <div className="mx-auto flex min-h-svh w-full max-w-2xl flex-col gap-6 p-6">
       <header className="flex flex-col gap-1">
+        <DashboardNav active="/" />
         <h1 className="font-heading text-lg font-medium">Catalog imports</h1>
         <p className="text-sm text-muted-foreground">
           Drop a supplier sheet and its photos; processing runs in the

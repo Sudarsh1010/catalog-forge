@@ -72,6 +72,16 @@ export const productEnrichments = pgTable(
       .default({}),
     /** Per-field Confidence 0–100 (GLOSSARY: Confidence). */
     confidence: jsonb("confidence").$type<Record<string, number>>().notNull(),
+    /**
+     * Per-field Origin (GLOSSARY: Origin): who produced each enriched field.
+     * A `manual` field is the merchant's edit — a later enrich re-run keeps
+     * its value, confidence and origin and never lets AI output clobber it.
+     * Absent key = `ai`.
+     */
+    fieldOrigins: jsonb("field_origins")
+      .$type<Record<string, "ai" | "manual">>()
+      .notNull()
+      .default({}),
     status: enrichmentStatus("status").notNull(),
     /** Extracted assertions with source pointers; [] — the stub invents none. */
     claims: jsonb("claims")

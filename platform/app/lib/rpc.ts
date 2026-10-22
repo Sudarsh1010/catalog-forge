@@ -9,13 +9,47 @@ import { implement, ORPCError } from "@orpc/server"
 import { desc, eq, sql } from "drizzle-orm"
 
 import { contract } from "@workspace/contracts"
-import { DEFAULT_STORE_ID } from "@workspace/pipeline"
+import {
+  DEFAULT_STORE_ID,
+  SOURCE_LOCALE,
+  TARGET_LOCALES,
+} from "@workspace/pipeline"
 import { imports } from "@workspace/db/schema"
 
 import { getDb } from "@/lib/db"
+import {
+  editProduct,
+  loadProductDetail,
+  loadProductList,
+  writePublications,
+} from "@/lib/products"
 import { loadImportDetail, toImportDto, UUID_RE } from "@/lib/imports"
 
 const os = implement(contract)
+
+const PRODUCT_NOT_FOUND = "PRODUCT_NOT_FOUND"
+const NO_ENRICHMENT = "NO_ENRICHMENT"
+const UNKNOWN_PRODUCTS = "UNKNOWN_PRODUCTS"
+
+const PRODUCT_NOT_FOUND_MESSAGE = "Product not found."
+const NO_ENRICHMENT_MESSAGE =
+  "This product has not been enriched yet — wait for the enrich stage to finish."
+
+function productNotFound() {
+  return new ORPCError(PRODUCT_NOT_FOUND, {
+    message: PRODUCT_NOT_FOUND_MESSAGE,
+    status: 404,
+  })
+}
+
+function noEnrichment() {
+  return new ORPCError(NO_ENRICHMENT, {
+    message: NO_ENRICHMENT_MESSAGE,
+    status: 422,
+  })
+}
+
+const PUBLISHED_LOCALES = [SOURCE_LOCALE, ...TARGET_LOCALES]
 
 const appRouter = os.router({
   import: {
@@ -160,6 +194,169 @@ const appRouter = os.router({
         productIds,
         stage: "enrich" as const,
       }
+    }),
+  },
+
+  product: {
+    /**
+     * The catalog table (user story 20): server-driven pagination
+     * (10/25/50/100), sort, search and filters. State lives in the query
+     * string, never in client-side sorting — the totals travel beside the
+     * rows so a 10k-row catalog pages without hauling every row over RPC.
+     */
+    list: os.product.list.handler(async ({ input }) =>
+      loadProductList(getDb().db, input)
+    ),
+
+    /** The side-by-side hydration (user story 22). */
+    detail: os.product.detail.handler(async ({ input }) => {
+      const product = await loadProductDetail(getDb().db, input.id)
+      if (!product) throw productNotFound()
+      return { product }
+    }),
+
+    /**
+     * Merchant edit (user story 23 + GLOSSARY: Origin): the edited fields
+     * turn `manual` and win over every later AI output for the Product —
+     * the enrich Stage's upsert preserves manual fields on re-run. When
+     * the Product is already approved, the Publication snapshot refreshes
+     * in the same transaction so the storefront never serves a stale
+     * rendering of an edited product.
+     */
+    edit: os.product.edit.handler(async ({ input }) => {
+      const db = getDb().db
+      return db.transaction(async (tx) => {
+        const result = await editProduct(tx, input.id, input.fields)
+        if (!result.ok) {
+          if (result.reason === "not_found") throw productNotFound()
+          throw noEnrichment()
+        }
+        // Refresh the snapshot when this Product is already published — an
+        // edited merchant field must not wait for a re-approval to ship.
+        const published = (
+          (await tx.execute(sql`
+            SELECT count(*)::int AS count FROM publications
+            WHERE product_id = ${input.id}
+          `)) as unknown as Array<{ count: number }>
+        )[0]!.count
+        if (published > 0) {
+          await writePublications(tx, [input.id])
+          const refreshed = await loadProductDetail(tx, input.id)
+          if (refreshed) return { product: refreshed }
+        }
+        return { product: result.product }
+      })
+    }),
+
+    /**
+     * Approve (user story 23): writes the render-ready Publications — the
+     * only transition into the shopper-visible world (ADR-0005). Needs
+     * Review Products CAN be approved: the human decision is the point.
+     */
+    approve: os.product.approve.handler(async ({ input }) => {
+      const db = getDb().db
+      return db.transaction(async (tx) => {
+        const state = (
+          (await tx.execute(sql`
+            SELECT e.status FROM products p
+            LEFT JOIN product_enrichments e ON e.product_id = p.id
+            WHERE p.id = ${input.id}
+          `)) as unknown as Array<{ status: string | null }>
+        )[0]
+        if (state === undefined) throw productNotFound()
+        if (state.status === null) throw noEnrichment()
+        await writePublications(tx, [input.id])
+        return { productId: input.id, publishedLocales: PUBLISHED_LOCALES }
+      })
+    }),
+
+    /**
+     * Bulk approve (user story 24): one transaction, one set-based
+     * Publications write for every enriched Product. Products without an
+     * enrichment are skipped and reported, never silently dropped.
+     */
+    bulkApprove: os.product.bulkApprove.handler(async ({ input }) => {
+      const db = getDb().db
+      const ids = [...new Set(input.ids)]
+      return db.transaction(async (tx) => {
+        const known = await tx.execute(sql`
+          SELECT id FROM products
+          WHERE id IN (${sql.join(
+            ids.map((id) => sql`${id}::uuid`),
+            sql`, `
+          )})
+        `)
+        const knownIds = new Set(
+          (known as unknown as Array<{ id: string }>).map((row) => row.id)
+        )
+        const missing = ids.filter((id) => !knownIds.has(id))
+        if (missing.length > 0) {
+          throw new ORPCError(UNKNOWN_PRODUCTS, {
+            status: 422,
+            message:
+              "Some selected products no longer exist — refresh the page and try again.",
+          })
+        }
+
+        const enriched = await tx.execute(sql`
+          SELECT product_id FROM product_enrichments
+          WHERE product_id IN (${sql.join(
+            ids.map((id) => sql`${id}::uuid`),
+            sql`, `
+          )})
+        `)
+        const enrichedIds = new Set(
+          (enriched as unknown as Array<{ product_id: string }>).map(
+            (row) => row.product_id
+          )
+        )
+        const approvable = ids.filter((id) => enrichedIds.has(id))
+        const written = await writePublications(tx, approvable)
+        const skipped = ids
+          .filter((id) => !enrichedIds.has(id))
+          .map((id) => ({ id, reason: "not enriched yet" }))
+        return {
+          approved: written.length,
+          productIds: written,
+          skipped,
+        }
+      })
+    }),
+
+    /**
+     * Send back (user story 23): writes the Re-run FACT the Worker adopts
+     * (GLOSSARY: Re-run, ADR-0004) and retracts the Publications — a
+     * Product under review is invisible by construction (ADR-0005), so a
+     * reworked product stops shipping immediately.
+     */
+    sendBack: os.product.sendBack.handler(async ({ input }) => {
+      const db = getDb().db
+      return db.transaction(async (tx) => {
+        const product = (await tx.execute(sql`
+          SELECT import_id FROM products WHERE id = ${input.id}
+        `)) as unknown as Array<{ import_id: string }>
+        if (product.length === 0) throw productNotFound()
+        await tx.execute(sql`
+          INSERT INTO reruns (store_id, import_id, stage, product_ids)
+          VALUES (
+            ${DEFAULT_STORE_ID},
+            ${product[0]!.import_id},
+            'enrich',
+            ARRAY[${input.id}::uuid]
+          )
+        `)
+        await tx.execute(sql`
+          DELETE FROM publications WHERE product_id = ${input.id}
+        `)
+        await tx.execute(sql`
+          UPDATE products SET
+            needs_review = true,
+            review_reason = 'Sent back by merchant — awaiting re-enrichment.',
+            updated_at = now()
+          WHERE id = ${input.id}
+        `)
+        return { productId: input.id, requested: 1, stage: "enrich" as const }
+      })
     }),
   },
 })

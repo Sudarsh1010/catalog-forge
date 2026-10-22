@@ -71,6 +71,13 @@
       "when": 1792685485375,
       "tag": "0009_known_nekra",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792685898161,
+      "tag": "0010_oval_kronos",
+      "breakpoints": true
     }
   ]
 }

@@ -12,7 +12,8 @@
  * call, so it appends another row. Stage advancement does not happen here:
  * the Job machinery advances the Import when the last Batch completes.
  */
-import { eq, sql } from "drizzle-orm"
+import { eq, sql, type SQL } from "drizzle-orm"
+import type { PgColumn } from "drizzle-orm/pg-core"
 
 import type { Database } from "@workspace/db"
 import {
@@ -41,6 +42,12 @@ const log = createLogger({ service: "worker:enrich" })
 
 export interface EnrichDeps {
   registry: ProviderRegistry
+}
+
+/** The post-merge enrichment state the gating decision reads. */
+interface EnrichmentUpsert {
+  status: "ready" | "needs_review"
+  reviewReasons: string[]
 }
 
 export function createEnrichHandler(deps: EnrichDeps): JobHandler {
@@ -234,7 +241,7 @@ async function enrichProduct(
     (provider) => provider.enrich(input)
   )
 
-  await upsertEnrichment(
+  const effective = await upsertEnrichment(
     db,
     storeId,
     importId,
@@ -242,8 +249,10 @@ async function enrichProduct(
     call.value,
     input.messiness
   )
-  if (call.value.status === "needs_review") {
-    await gateNeedsReview(db, product, call.value.reviewReasons)
+  // Gating reads the post-merge state: reasons the merchant already answered
+  // with a manual edit were dropped by the upsert, so they no longer flag.
+  if (effective.status === "needs_review") {
+    await gateNeedsReview(db, product, effective.reviewReasons)
   }
   await db.insert(providerUsage).values({
     storeId,
@@ -258,6 +267,39 @@ async function enrichProduct(
   })
 }
 
+/**
+ * SQL fragment evaluating to the stored Origin (GLOSSARY) of one enriched
+ * field: `'manual'` when the merchant edited it, `'ai'` otherwise. `key` is
+ * a raw SQL text expression (a literal or a computed key such as the field
+ * prefix of a review reason).
+ */
+function originOf(key: SQL): SQL {
+  return sql`COALESCE(${productEnrichments.fieldOrigins} ->> ${key}, 'ai')`
+}
+
+/** A literal field name as a bound SQL text parameter. */
+function fieldKey(name: string): SQL {
+  return sql`${name}`
+}
+
+/** Keep the stored value for manual fields; take the new AI value otherwise. */
+function keepManual(column: PgColumn, field: string): SQL {
+  return sql`CASE WHEN ${originOf(fieldKey(field))} = 'manual'
+              THEN ${column} ELSE EXCLUDED.${sql.raw(field)} END`
+}
+
+/**
+ * Idempotent enrichment upsert (ADR-0003) with Origin precedence (GLOSSARY:
+ * Origin — a manual field always wins over later AI output). On conflict the
+ * merchant-edited fields — `field_origins` key = `manual` — keep their value,
+ * confidence and origin; every other field takes the new AI output and its
+ * confidence. Review reasons about manual fields are dropped, and the
+ * effective status recomputes from the kept reasons: a product whose only
+ * flagged fields the merchant already rewrote is no longer Needs Review.
+ *
+ * The whole merge happens inside the ON CONFLICT clause so a redelivered Job
+ * converges atomically — no read-then-write window.
+ */
 async function upsertEnrichment(
   db: Database,
   storeId: string,
@@ -265,8 +307,8 @@ async function upsertEnrichment(
   productId: string,
   value: EnrichmentResult,
   messiness: number
-): Promise<void> {
-  await db
+): Promise<EnrichmentUpsert> {
+  const [row] = await db
     .insert(productEnrichments)
     .values({
       storeId,
@@ -288,21 +330,47 @@ async function upsertEnrichment(
     .onConflictDoUpdate({
       target: productEnrichments.productId,
       set: {
-        title: sql`EXCLUDED.title`,
-        handle: sql`EXCLUDED.handle`,
-        description: sql`EXCLUDED.description`,
-        category: sql`EXCLUDED.category`,
-        tags: sql`EXCLUDED.tags`,
-        attributes: sql`EXCLUDED.attributes`,
-        confidence: sql`EXCLUDED.confidence`,
-        status: sql`EXCLUDED.status`,
+        title: keepManual(productEnrichments.title, "title"),
+        handle: keepManual(productEnrichments.handle, "handle"),
+        description: keepManual(productEnrichments.description, "description"),
+        category: keepManual(productEnrichments.category, "category"),
+        tags: keepManual(productEnrichments.tags, "tags"),
+        attributes: keepManual(productEnrichments.attributes, "attributes"),
+        confidence: sql`
+          (SELECT jsonb_object_agg(
+             e.k,
+             CASE WHEN ${originOf(sql`e.k`)} = 'manual' THEN e.v
+                  ELSE EXCLUDED.confidence -> e.k END
+           ORDER BY e.k)
+           FROM jsonb_each(EXCLUDED.confidence) AS e(k, v)`,
+        // Manual origins survive; AI-produced origins reset (absent = 'ai').
+        fieldOrigins: sql`
+          COALESCE((SELECT jsonb_object_agg(k, v)
+            FROM jsonb_each(${productEnrichments.fieldOrigins})
+            WHERE v #>> '{}' = 'manual'), '{}'::jsonb)`,
+        status: sql`
+          CASE WHEN EXISTS (
+            SELECT 1 FROM jsonb_array_elements(EXCLUDED.review_reasons) AS r
+            WHERE ${originOf(sql`split_part(r #>> '{}', ':', 1)`)} <> 'manual'
+          ) THEN 'needs_review'::enrichment_status
+          ELSE 'ready'::enrichment_status END`,
+        reviewReasons: sql`
+          COALESCE((SELECT jsonb_agg(r ORDER BY ord)
+            FROM jsonb_array_elements(EXCLUDED.review_reasons)
+              WITH ORDINALITY AS t(r, ord)
+            WHERE ${originOf(sql`split_part(t.r #>> '{}', ':', 1)`)} <> 'manual'
+          ), '[]'::jsonb)`,
         claims: sql`EXCLUDED.claims`,
-        reviewReasons: sql`EXCLUDED.review_reasons`,
         sourceRowIndexes: sql`EXCLUDED.source_row_indexes`,
         messiness: sql`EXCLUDED.messiness`,
         updatedAt: new Date(),
       },
     })
+    .returning({
+      status: productEnrichments.status,
+      reviewReasons: productEnrichments.reviewReasons,
+    })
+  return row!
 }
 
 /**

@@ -124,3 +124,204 @@ export const UploadResultSchema = z.object({
   deduped: z.boolean(),
 })
 export type UploadResult = z.infer<typeof UploadResultSchema>
+
+// ------------------------------------------------------------- products --
+// The Products review tab (spec user stories 20–24). Same read-model rules
+// as the Import namespace (ADR-0004), plus the review actions: an edit
+// stores Origin, approval writes Publications (ADR-0005), send-back writes
+// the Re-run fact the Worker adopts.
+
+/** Page sizes the Products tab offers (user story 20). */
+export const PRODUCT_PAGE_SIZES = [10, 25, 50, 100] as const
+export const ProductPageSizeSchema = z
+  .number()
+  .int()
+  .refine(
+    (value): value is (typeof PRODUCT_PAGE_SIZES)[number] =>
+      (PRODUCT_PAGE_SIZES as readonly number[]).includes(value),
+    "must be one of 10, 25, 50, 100"
+  )
+
+/** Sort keys; `title` falls back to the grouping title pre-enrichment. */
+export const ProductSortSchema = z.enum([
+  "title",
+  "status",
+  "confidence",
+  "messiness",
+  "updatedAt",
+])
+export type ProductSort = z.infer<typeof ProductSortSchema>
+
+/** Derived review state of one Product. `pending` = not enriched yet. */
+export const ProductStatusSchema = z.enum([
+  "approved",
+  "needs_review",
+  "ready",
+  "pending",
+])
+export type ProductStatus = z.infer<typeof ProductStatusSchema>
+
+export const ProductStatusFilterSchema = z.enum([
+  "all",
+  ...ProductStatusSchema.options,
+])
+
+/**
+ * Confidence buckets (GLOSSARY: Confidence 0–100). The boundaries are the
+ * review threshold the providers gate on: < 70 is low (red), 70–89 medium
+ * (amber), ≥ 90 high (green) — the same cut the colour coding uses.
+ */
+export const CONFIDENCE_LOW_BELOW = 70
+export const CONFIDENCE_HIGH_FROM = 90
+export const ProductConfidenceFilterSchema = z.enum([
+  "all",
+  "low",
+  "medium",
+  "high",
+])
+
+/** One Products-tab row: the review surface's list projection. */
+export const ProductListRowSchema = z.object({
+  id: z.string(),
+  importId: z.string(),
+  importFilename: z.string(),
+  naturalKey: z.string(),
+  /** Enriched title, falling back to the grouping title. */
+  title: z.string(),
+  handle: z.string().nullable(),
+  status: ProductStatusSchema,
+  /** Enrichment review reasons still standing (empty once addressed). */
+  reviewReasons: z.array(z.string()),
+  /** Per-field Confidence 0–100 (GLOSSARY); empty pre-enrichment. */
+  confidence: z.record(z.string(), z.number()),
+  /** The weakest field's Confidence — the row's colour driver. */
+  minConfidence: z.number().nullable(),
+  messiness: z.number().nullable(),
+  sourceRowCount: z.number(),
+  photoCount: z.number(),
+  /** True when the merchant edited at least one field (GLOSSARY: Origin). */
+  editedByMerchant: z.boolean(),
+  /** Locales a Publication exists for — non-empty means approved. */
+  publishedLocales: z.array(z.string()),
+  updatedAt: z.string(),
+})
+export type ProductListRow = z.infer<typeof ProductListRowSchema>
+
+export const ProductListResultSchema = z.object({
+  rows: z.array(ProductListRowSchema),
+  total: z.number(),
+  page: z.number(),
+  pageSize: z.number(),
+})
+export type ProductListResult = z.infer<typeof ProductListResultSchema>
+
+/** One Sheet Row exactly as parsed (GLOSSARY: Sheet Row) — the left pane. */
+export const SourceRowSchema = z.object({
+  rowIndex: z.number(),
+  cells: z.array(z.union([z.string(), z.number(), z.boolean(), z.null()])),
+})
+export type SourceRowDto = z.infer<typeof SourceRowSchema>
+
+/** One Variant of the Product (GLOSSARY: Variant). */
+export const ProductVariantSchema = z.object({
+  id: z.string(),
+  sku: z.string().nullable(),
+  gtin: z.string().nullable(),
+  priceCents: z.number().nullable(),
+  priceCurrency: z.string().nullable(),
+  attributes: z.record(z.string(), z.string()),
+  imageRef: z.string().nullable(),
+  sourceRowIndex: z.number(),
+  needsReview: z.boolean(),
+  reviewReason: z.string().nullable(),
+})
+export type ProductVariantDto = z.infer<typeof ProductVariantSchema>
+
+/** One photo matched to the Product, with its match evidence. */
+export const ProductPhotoSchema = z.object({
+  fileId: z.string(),
+  filename: z.string(),
+  /** Storage object key — the panel streams it via `/api/photos/[fileId]`. */
+  objectKey: z.string(),
+  matchedVia: z.string(),
+  matchedToken: z.string(),
+})
+export type ProductPhotoDto = z.infer<typeof ProductPhotoSchema>
+
+/** One Claim with its exact source pointer (GLOSSARY: Claim). */
+export const ClaimSchema = z.object({
+  text: z.string(),
+  sourceRowIndex: z.number(),
+})
+export type ClaimDto = z.infer<typeof ClaimSchema>
+
+/** The AI result side of the side-by-side panel. */
+export const ProductEnrichmentSchema = z.object({
+  title: z.string(),
+  handle: z.string(),
+  description: z.string(),
+  category: z.string(),
+  tags: z.array(z.string()),
+  attributes: z.record(z.string(), z.string()),
+  confidence: z.record(z.string(), z.number()),
+  /** Per-field Origin (GLOSSARY): `manual` fields win over later AI output. */
+  fieldOrigins: z.record(z.string(), z.enum(["ai", "manual"])),
+  status: z.enum(["ready", "needs_review"]),
+  reviewReasons: z.array(z.string()),
+  claims: z.array(ClaimSchema),
+  sourceRowIndexes: z.array(z.number()),
+  messiness: z.number(),
+  updatedAt: z.string(),
+})
+export type ProductEnrichmentDto = z.infer<typeof ProductEnrichmentSchema>
+
+/** One localized field translation with its Origin and staleness. */
+export const ProductTranslationSchema = z.object({
+  locale: z.string(),
+  field: z.string(),
+  text: z.string(),
+  origin: z.enum(["ai", "manual"]),
+  outOfDate: z.boolean(),
+})
+export type ProductTranslationDto = z.infer<typeof ProductTranslationSchema>
+
+/** Full side-by-side hydration for one Product. */
+export const ProductDetailSchema = z.object({
+  id: z.string(),
+  importId: z.string(),
+  importFilename: z.string(),
+  naturalKey: z.string(),
+  identityKind: z.enum(["code", "title"]),
+  brand: z.string().nullable(),
+  gtin: z.string().nullable(),
+  createdAt: z.string(),
+  status: ProductStatusSchema,
+  enrichment: ProductEnrichmentSchema.nullable(),
+  sheetHeader: z.array(z.string()),
+  sourceRows: z.array(SourceRowSchema),
+  variants: z.array(ProductVariantSchema),
+  photos: z.array(ProductPhotoSchema),
+  translations: z.array(ProductTranslationSchema),
+  /** Non-null once approved (GLOSSARY: Publication). */
+  publication: z
+    .object({ locales: z.array(z.string()), publishedAt: z.string() })
+    .nullable(),
+})
+export type ProductDetailDto = z.infer<typeof ProductDetailSchema>
+
+/** The fields a merchant may edit; at least one must be present. */
+export const ProductEditFieldsSchema = z
+  .object({
+    title: z.string().min(1).max(500),
+    handle: z.string().min(1).max(500),
+    description: z.string().max(20_000),
+    category: z.string().max(500),
+    tags: z.array(z.string().min(1).max(200)).max(50),
+    attributes: z.record(z.string().min(1).max(200), z.string().max(2000)),
+  })
+  .partial()
+  .refine(
+    (fields) => Object.values(fields).some((value) => value !== undefined),
+    "at least one field is required"
+  )
+export type ProductEditFields = z.infer<typeof ProductEditFieldsSchema>

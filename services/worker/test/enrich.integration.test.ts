@@ -209,13 +209,14 @@ interface EnrichmentRow {
   claims: unknown[]
   review_reasons: string[]
   source_row_indexes: number[]
+  field_origins: Record<string, string>
 }
 
 async function enrichmentRows(): Promise<EnrichmentRow[]> {
   return (await db.db.execute(sql`
     SELECT product_id, title, handle, description, category, tags, attributes,
            confidence, status::text AS status, claims, review_reasons,
-           source_row_indexes
+           source_row_indexes, field_origins
     FROM product_enrichments
     ORDER BY title
   `)) as unknown as EnrichmentRow[]
@@ -318,6 +319,57 @@ describe("enrich Stage on the stub provider (Demo Mode)", () => {
     await runThroughEnrich(imp.id)
 
     expect(await enrichmentRows()).toEqual(first)
+  })
+
+  it("keeps merchant-edited fields over later AI output (GLOSSARY: Origin)", async () => {
+    const imp = await seedUpload()
+    await runThroughEnrich(imp.id)
+
+    // The merchant edits Blumentopf: the two fields the stub composed
+    // (description, title) become manual with confidence 100; the review
+    // reasons about them are answered.
+    const products = await productsById()
+    const blumentopf = products.get("sku:bm-01")!
+    await db.db.execute(sql`
+      UPDATE product_enrichments SET
+        title = 'Blumentopf klassisch',
+        description = 'Von Hand gegossen, aus Terrakotta.',
+        field_origins = '{"title": "manual", "description": "manual"}'::jsonb,
+        confidence = confidence || '{"title": 100, "description": 100}'::jsonb,
+        status = 'ready',
+        review_reasons = '[]'::jsonb,
+        updated_at = now()
+      WHERE product_id = ${blumentopf!.id}
+    `)
+
+    // Later AI output: the enrich Jobs re-run (a redelivered or Re-run
+    // Job — same upsert path either way, ADR-0003).
+    await db.db.execute(sql`
+      UPDATE jobs SET status = 'pending', attempts = 0, lease_owner = NULL,
+        lease_expires_at = NULL
+      WHERE import_id = ${imp.id} AND stage = 'enrich'
+    `)
+    await runThroughEnrich(imp.id)
+
+    const rows = await enrichmentRows()
+    expect(rows).toHaveLength(3) // no duplicates — the upsert converged
+    const edited = rows.find((row) => row.title === "Blumentopf klassisch")!
+    expect(edited).toBeDefined()
+    // The merchant's wording survived; the AI's recomposition did not land.
+    expect(edited!.description).toBe("Von Hand gegossen, aus Terrakotta.")
+    expect(edited!.field_origins).toMatchObject({
+      title: "manual",
+      description: "manual",
+    })
+    expect(edited!.confidence).toMatchObject({ title: 100, description: 100 })
+    // The stub re-derived everything non-manual — tags (from empty
+    // brand/category/attributes) stay empty, nothing clobbered the edits.
+    expect(edited!.tags).toEqual([])
+    // The description reason is answered (manual); the category reason —
+    // the stub still composes the category — keeps the Product flagged.
+    expect(edited!.status).toBe("needs_review")
+    expect(edited!.review_reasons).toHaveLength(1)
+    expect(edited!.review_reasons[0]).toContain("category:")
   })
 
   it("records synthetic usage per call, aggregatable by Import and Product", async () => {
