@@ -23,6 +23,7 @@ import { adoptQueuedImports, sweepStalledStageAdvances } from "./imports"
 import { enterProviderPause, resumeExpiredPauses } from "./pause"
 import type { PoisonHandler } from "./poison"
 import { adoptJobRetries } from "./retries"
+import { adoptReruns } from "./reruns"
 import type { StagePlannerRegistry } from "./stages"
 import type { ClaimedJob } from "./jobs"
 import {
@@ -336,6 +337,15 @@ export function createWorker(options: CreateWorkerOptions): WorkerHandle {
     for (const retry of retried) {
       log.info(`sweeper adopted retry request — poison job requeued`, {
         ...retry,
+        workerId: config.workerId,
+      })
+    }
+    // Safety net, part 1c: adopt Re-run requests (ADR-0004) — the enrich
+    // Jobs covering the chosen Products requeue with reset attempts.
+    const reran = await adoptReruns(db.db)
+    for (const rerun of reran) {
+      log.info(`sweeper adopted re-run request — enrich jobs requeued`, {
+        ...rerun,
         workerId: config.workerId,
       })
     }

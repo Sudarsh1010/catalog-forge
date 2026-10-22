@@ -30,6 +30,8 @@ export { failBatchRows, healBatchRows, isBatchStage } from "./poison"
 export type { PoisonedJob, PoisonHandler } from "./poison"
 export { adoptJobRetries } from "./retries"
 export type { AdoptedRetry } from "./retries"
+export { adoptReruns } from "./reruns"
+export type { AdoptedRerun } from "./reruns"
 export { backoffDelayMs } from "./backoff"
 export type { BackoffOptions } from "./backoff"
 export type {
