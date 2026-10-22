@@ -207,7 +207,7 @@ export async function loadProductList(
     sourceRowCount: row.row_indexes.length,
     photoCount: row.photo_count,
     editedByMerchant: row.edited_by_merchant,
-    publishedLocales: row.published_locales ?? [],
+    publishedLocales: (row.published_locales ?? []).sort(),
     updatedAt: toIso(row.updated_at)!,
   }))
   return {
@@ -460,6 +460,8 @@ export async function editProduct(
   if (existing.status === null) return { ok: false, reason: "no_enrichment" }
 
   const sets: SQL[] = []
+  const originsPatch: Record<string, "manual"> = {}
+  const confidencePatch: Record<string, number> = {}
   for (const [field, value] of edited) {
     if (field === "attributes") {
       sets.push(sql`attributes = ${JSON.stringify(value)}::jsonb`)
@@ -468,25 +470,29 @@ export async function editProduct(
     } else {
       sets.push(sql`${sql.identifier(field)} = ${value}`)
     }
-    sets.push(
-      sql`field_origins = field_origins || ${JSON.stringify({ [field]: "manual" })}::jsonb`,
-      sql`confidence = confidence || ${JSON.stringify({ [field]: 100 })}::jsonb`
-    )
+    originsPatch[field] = "manual"
+    confidencePatch[field] = 100
   }
+  sets.push(
+    sql`field_origins = field_origins || ${JSON.stringify(originsPatch)}::jsonb`,
+    sql`confidence = confidence || ${JSON.stringify(confidencePatch)}::jsonb`
+  )
   // Reasons the merchant answered with an edit stop flagging the Product;
-  // the status follows the kept reasons.
+  // the status follows the kept reasons. The correlated reference must be
+  // table-qualified — bare names do not resolve inside FROM subqueries.
   const editedKeys = edited.map(([field]) => field)
   sets.push(
     sql`review_reasons = COALESCE((
       SELECT jsonb_agg(r ORDER BY ord)
-      FROM jsonb_array_elements(review_reasons) WITH ORDINALITY AS t(r, ord)
-      WHERE split_part(r #>> '{}', ':', 1) <> ALL(${editedKeys}::text[])
+      FROM jsonb_array_elements(product_enrichments.review_reasons)
+        WITH ORDINALITY AS t(r, ord)
+      WHERE split_part(t.r #>> '{}', ':', 1) <> ALL(${sql.param(editedKeys)}::text[])
     ), '[]'::jsonb)`
   )
   sets.push(
     sql`status = CASE WHEN EXISTS (
-      SELECT 1 FROM jsonb_array_elements(review_reasons) AS r
-      WHERE split_part(r #>> '{}', ':', 1) <> ALL(${editedKeys}::text[])
+      SELECT 1 FROM jsonb_array_elements(product_enrichments.review_reasons) AS r
+      WHERE split_part(r #>> '{}', ':', 1) <> ALL(${sql.param(editedKeys)}::text[])
     ) THEN 'needs_review'::enrichment_status ELSE 'ready'::enrichment_status END`
   )
 

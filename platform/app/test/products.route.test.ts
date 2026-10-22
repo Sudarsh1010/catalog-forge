@@ -100,10 +100,10 @@ async function seedProduct(
   const id = crypto.randomUUID()
   await db.db.execute(sql`
     INSERT INTO products (
-      id, store_id, import_id, identity_kind, natural_key,
+      id, store_id, import_id, family_key, identity_kind, natural_key,
       natural_key_hash, title, brand, needs_review, review_reason
     ) VALUES (
-      ${id}, 'default', ${importId}, 'code', ${naturalKey},
+      ${id}, 'default', ${importId}, 'supplier-sheet.csv', 'code', ${naturalKey},
       ${keyHash(naturalKey)}, ${`Raw ${naturalKey}`}, ${options.brand ?? null},
       ${options.needsReview ?? false}, ${options.reviewReason ?? null}
     )
@@ -469,7 +469,7 @@ describe("product.list (the review tab table)", () => {
     })
     expect(approved.total).toBe(1)
     expect(approved.rows[0]!.id).toBe(high)
-    expect(approved.rows[0]!.publishedLocales).toEqual(["en", "de", "fr"])
+    expect(approved.rows[0]!.publishedLocales).toEqual(["de", "en", "fr"])
 
     const needsReview = await client.product.list({
       page: 1,
