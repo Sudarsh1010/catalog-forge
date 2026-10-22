@@ -27,10 +27,13 @@ import { createLogger } from "@workspace/log"
 
 import type { JobContext, JobHandler } from "../handlers"
 import { parseProductBatchKey } from "../media/plan"
+import { healBatchRows } from "../poison"
 import {
   routingTierFor,
+  routingTierFrom,
   syntheticCostMicros,
   type ProviderRegistry,
+  type RoutingTier,
   type TranslateField,
 } from "../provider"
 
@@ -65,6 +68,9 @@ export function createTranslateHandler(deps: TranslateDeps): JobHandler {
     const locale = range.locale as (typeof TARGET_LOCALES)[number]
 
     const batch = await loadBatch(db, job.importId, range.start, range.end)
+    // The tier travels on the Job (stamped at plan time); the per-item
+    // messiness recorded at enrich time is the fallback.
+    const tier = routingTierFrom(job.routingTier)
     for (const item of batch) {
       await translateProduct(
         db,
@@ -72,9 +78,12 @@ export function createTranslateHandler(deps: TranslateDeps): JobHandler {
         job.storeId,
         job.importId,
         item,
-        locale
+        locale,
+        tier
       )
     }
+    // A retry that succeeded heals the poison quarantine (EC-122).
+    await healBatchRows(db, job.importId, job.batchKey)
 
     log.info(`translate batch completed`, {
       importId: job.importId,
@@ -184,15 +193,18 @@ async function translateProduct(
   storeId: string,
   importId: string,
   item: BatchItem,
-  locale: (typeof TARGET_LOCALES)[number]
+  locale: (typeof TARGET_LOCALES)[number],
+  tier: RoutingTier | null
 ): Promise<void> {
-  const call = await registry.run(routingTierFor(item.messiness), (provider) =>
-    provider.translate({
-      locale,
-      fields: item.fields,
-      brand: item.brand,
-      protectedTokens: item.protectedTokens,
-    })
+  const call = await registry.run(
+    tier ?? routingTierFor(item.messiness),
+    (provider) =>
+      provider.translate({
+        locale,
+        fields: item.fields,
+        brand: item.brand,
+        protectedTokens: item.protectedTokens,
+      })
   )
 
   // EC-088: fields whose "translation" equals the source are no-ops — the

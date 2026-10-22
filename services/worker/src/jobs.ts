@@ -24,6 +24,8 @@ export type ClaimedJob = Pick<
   | "batchKey"
   | "attempts"
   | "maxAttempts"
+  | "providerId"
+  | "routingTier"
 >
 
 /** snake_case shape of the `RETURNING id, store_id, …` projection in `claimJob`. */
@@ -35,6 +37,8 @@ interface ClaimedRow {
   batch_key: string
   attempts: number
   max_attempts: number
+  provider_id: string | null
+  routing_tier: string | null
 }
 
 /**
@@ -93,11 +97,21 @@ export async function claimJob(
         LEFT JOIN imports i ON i.id = j.import_id
         WHERE j.status = 'pending'
           AND ${stageOrder("jobs")} <= ${stageOrder("imports")}
+          -- Backoff/Pause requeues stay asleep until their delay elapses (EC-082).
+          AND (j.available_at IS NULL OR j.available_at <= now())
+          -- Pause (GLOSSARY): a throttled provider's Jobs are not claimable
+          -- across ALL Imports; other providers keep working. provider_id
+          -- is stamped at plan time, NULL for non-provider Stages.
+          AND NOT EXISTS (
+            SELECT 1 FROM provider_pauses pp
+            WHERE pp.store_id = j.store_id AND pp.provider_id = j.provider_id
+          )
         ORDER BY j.created_at, j.id
         FOR UPDATE OF j SKIP LOCKED
         LIMIT 1
       )
-      RETURNING id, store_id, import_id, stage, batch_key, attempts, max_attempts
+      RETURNING id, store_id, import_id, stage, batch_key, attempts, max_attempts,
+                provider_id, routing_tier
     `)
   )
   const row = rows[0]
@@ -110,6 +124,8 @@ export async function claimJob(
     batchKey: row.batch_key,
     attempts: row.attempts,
     maxAttempts: row.max_attempts,
+    providerId: row.provider_id,
+    routingTier: row.routing_tier,
   }
 }
 
@@ -202,19 +218,70 @@ export async function completeJob(
  * Mark a Job failed. If attempts are exhausted it terminates as `failed`
  * with the reason; otherwise it returns to `pending` for another claim.
  * Attempts are incremented at claim time, so this never bumps the counter.
+ * Returns `true` when the Job became terminally Failed (the poison path —
+ * the caller records the Row Ledger consequences).
  */
 export async function failJob(
   db: Database,
   config: WorkerConfig,
   jobId: string,
   reason: string
+): Promise<boolean> {
+  const rows = rowsOf<{ status: string }>(
+    await db.execute(sql`
+      UPDATE jobs SET
+        status = CASE WHEN attempts >= max_attempts THEN 'failed'::job_status ELSE 'pending'::job_status END,
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        available_at = NULL,
+        last_error = ${reason},
+        updated_at = now()
+      WHERE id = ${jobId} AND status = 'running' AND lease_owner = ${config.workerId}
+      RETURNING status::text AS status
+    `)
+  )
+  return rows[0]?.status === "failed"
+}
+
+export interface RequeueOptions {
+  /** Earliest next claim: the backoff/Pause delay from now. */
+  delayMs: number
+  /**
+   * `true` for `rate_limited` faults (EC-082: throttling is the provider's
+   * signal, not the Job's failure — the attempt this requeue undoes was
+   * already refunded by claiming, so give it back).
+   */
+  refundAttempt: boolean
+  /** Recorded in `last_error` for dashboard observability. */
+  reason: string
+}
+
+/**
+ * Requeue a claimed Job with a delay (exponential backoff on
+ * 5xx/timeout/invalid-JSON, Retry-After on 429). The Job returns to
+ * `pending` and sleeps until `available_at`; the claim gate skips it until
+ * then. Guarded to the claiming worker so a lost lease never requeues.
+ */
+export async function requeueJob(
+  db: Database,
+  config: WorkerConfig,
+  jobId: string,
+  options: RequeueOptions
 ): Promise<void> {
+  const availableAt = new Date(
+    config.now() + Math.max(0, options.delayMs)
+  ).toISOString()
+  const attemptUpdate = options.refundAttempt
+    ? sql`attempts = GREATEST(attempts - 1, 0),`
+    : sql``
   await db.execute(sql`
     UPDATE jobs SET
-      status = CASE WHEN attempts >= max_attempts THEN 'failed'::job_status ELSE 'pending'::job_status END,
+      status = 'pending',
+      ${attemptUpdate}
       lease_owner = NULL,
       lease_expires_at = NULL,
-      last_error = ${reason},
+      available_at = ${availableAt},
+      last_error = ${options.reason},
       updated_at = now()
     WHERE id = ${jobId} AND status = 'running' AND lease_owner = ${config.workerId}
   `)

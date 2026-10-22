@@ -25,12 +25,15 @@ import { createLogger } from "@workspace/log"
 
 import type { JobContext, JobHandler } from "../handlers"
 import { parseProductBatchKey } from "../media/plan"
+import { healBatchRows } from "../poison"
 import {
   routingTierFor,
+  routingTierFrom,
   syntheticCostMicros,
   type EnrichInput,
   type EnrichmentResult,
   type ProviderRegistry,
+  type RoutingTier,
 } from "../provider"
 
 const log = createLogger({ service: "worker:enrich" })
@@ -62,9 +65,23 @@ export function createEnrichHandler(deps: EnrichDeps): JobHandler {
       range.start,
       range.end
     )
+    // The tier travels on the Job (stamped at plan time via the Messiness
+    // Score); a provider-less Job falls back to per-product routing inside
+    // enrichProduct, where the full score is known.
+    const tier = routingTierFrom(job.routingTier)
     for (const product of batch) {
-      await enrichProduct(db, deps.registry, job.storeId, job.importId, product)
+      await enrichProduct(
+        db,
+        deps.registry,
+        job.storeId,
+        job.importId,
+        product,
+        tier
+      )
     }
+    // A retry that succeeded heals the poison quarantine (EC-122): rows
+    // this Batch had driven Failed return to their durable terminal state.
+    await healBatchRows(db, job.importId, job.batchKey)
 
     log.info(`enrich batch completed`, {
       importId: job.importId,
@@ -155,10 +172,10 @@ async function loadBatchProducts(
 
 /**
  * The Messiness Score signal (GLOSSARY): missing fields, identity
- * evidence, variant review state and photo spread. Decides the routing
- * tier — nothing else in Demo Mode. Every input is stable under the enrich
- * handler's own writes (it never mutates these), so a redelivered Job
- * scores — and routes — identically (ADR-0003).
+ * evidence, variant review state and photo spread. Recorded per Product and
+ * used as the routing fallback — the primary tier travels on the Job
+ * (`routing_tier`, stamped at plan time from the same formula), so every
+ * call of a Job goes to the provider its claim gate knows about.
  */
 export function messinessScore(
   product: BatchProduct,
@@ -183,7 +200,8 @@ async function enrichProduct(
   registry: ProviderRegistry,
   storeId: string,
   importId: string,
-  product: BatchProduct
+  product: BatchProduct,
+  tier: RoutingTier | null
 ): Promise<void> {
   const memberRows = (await db.execute(sql`
     SELECT row_index FROM row_ledger
@@ -235,8 +253,9 @@ async function enrichProduct(
     sourceRows: memberRows.map((row) => row.row_index),
   }
 
-  const call = await registry.run(routingTierFor(input.messiness), (provider) =>
-    provider.enrich(input)
+  const call = await registry.run(
+    tier ?? routingTierFor(input.messiness),
+    (provider) => provider.enrich(input)
   )
 
   await upsertEnrichment(

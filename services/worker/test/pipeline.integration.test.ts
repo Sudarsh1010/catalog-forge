@@ -250,7 +250,9 @@ async function enrichmentSnapshot(): Promise<EnrichmentSnapshot[]> {
 describe("Demo Mode end-to-end (no API keys)", () => {
   it("takes sheet + photos to `done`: ledger adds up incl. needs_review and failed, enrich is deterministic, usage aggregates", async () => {
     // The stub provider takes no credentials — the port cannot carry a key.
-    expect(createStubProvider.length).toBe(0)
+    // Ticket 6 added the chaos OPTIONS argument (env in dev, tests here);
+    // keyless construction still yields the Demo Mode provider.
+    expect(createStubProvider().id).toBe(STUB_PROVIDER_ID)
 
     const imp = await seedUpload()
     await runToDone(imp.id)
