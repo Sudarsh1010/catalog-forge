@@ -1,0 +1,1275 @@
+{
+  "sheet": "supplier-sheet.csv",
+  "products": [
+    {
+      "id": "P01",
+      "title": "Gießkanne 5 L",
+      "sourceRows": [1, 2, 3, 105],
+      "variants": [
+        {
+          "row": 1,
+          "sku": "TP-100-R",
+          "priceCents": 1250,
+          "currency": "EUR"
+        },
+        {
+          "row": 3,
+          "sku": "TP-100-G",
+          "priceCents": 1250,
+          "currency": "EUR"
+        }
+      ],
+      "photos": ["tp-100-gruen-01.png"],
+      "claims": ["robuster Stahlkörper"]
+    },
+    {
+      "id": "P02",
+      "title": "Blumenkübel Terrakotta Ø 50 cm",
+      "sourceRows": [4, 5, 6, 7, 103],
+      "variants": [
+        {
+          "row": 4,
+          "sku": "KB-50",
+          "priceCents": 2499,
+          "currency": "EUR"
+        },
+        {
+          "row": 6,
+          "sku": "KB-50-A",
+          "priceCents": 2999,
+          "currency": "EUR"
+        }
+      ],
+      "photos": ["kb-50-01.png"],
+      "needsReview": true,
+      "claims": ["Frostempfindlich", "nicht frostsicher", "bei 0 °C einlagern"]
+    },
+    {
+      "id": "P03",
+      "title": "Lounge-Sofa 2-Sitzer",
+      "sourceRows": [8, 9, 10, 92, 93],
+      "variants": [
+        {
+          "row": 8,
+          "sku": "SOFA-2A",
+          "priceCents": 89900,
+          "currency": "EUR"
+        },
+        {
+          "row": 9,
+          "sku": "SOFA-2B",
+          "priceCents": 129900,
+          "currency": "EUR"
+        }
+      ],
+      "photos": []
+    },
+    {
+      "id": "P04",
+      "title": "Lounge-Sofa 3-Sitzer",
+      "sourceRows": [11, 12, 121],
+      "variants": [
+        {
+          "row": 11,
+          "sku": "SOFA-3",
+          "priceCents": 114900,
+          "currency": "EUR"
+        }
+      ],
+      "photos": ["sofa-3-01.png"]
+    },
+    {
+      "id": "P05",
+      "title": "Wanduhr Retro",
+      "sourceRows": [13, 14, 104],
+      "variants": [
+        {
+          "row": 13,
+          "sku": "NU-01",
+          "priceCents": 1999,
+          "currency": "EUR"
+        }
+      ],
+      "photos": ["nu-01-01.png"]
+    },
+    {
+      "id": "P06",
+      "title": "Watering Can 8L",
+      "sourceRows": [15, 16],
+      "variants": [
+        {
+          "row": 15,
+          "sku": "WC-UK",
+          "priceCents": 800,
+          "currency": "GBP"
+        }
+      ],
+      "photos": ["wc-uk-01.png"]
+    },
+    {
+      "id": "P07",
+      "title": "Garden Hose 20 m",
+      "sourceRows": [17, 18],
+      "variants": [
+        {
+          "row": 17,
+          "sku": "GH-20",
+          "priceCents": 2499,
+          "currency": "USD"
+        }
+      ],
+      "photos": []
+    },
+    {
+      "id": "P08",
+      "title": "Rosenbogen Stahl",
+      "sourceRows": [19, 20, 21, 22, 102],
+      "variants": [
+        {
+          "row": 19,
+          "sku": "RB-50",
+          "priceCents": 4900,
+          "currency": "EUR"
+        }
+      ],
+      "photos": ["rb-50-01.png"],
+      "claims": ["Pulverbeschichtet"]
+    },
+    {
+      "id": "P09",
+      "title": "Zitrusbaum Zitronenbaum",
+      "sourceRows": [23, 95, 108],
+      "variants": [
+        {
+          "row": 23,
+          "sku": "FK-12",
+          "priceCents": 3495,
+          "currency": "EUR"
+        }
+      ],
+      "photos": ["fk-12-01.png"],
+      "claims": [
+        "frost-resistant",
+        "not frost-proof",
+        "bring indoors below 0 °C"
+      ]
+    },
+    {
+      "id": "P10",
+      "title": "Laterne Porto",
+      "sourceRows": [24, 25, 90, 91],
+      "variants": [
+        {
+          "row": 24,
+          "sku": "LP-01",
+          "priceCents": 3990,
+          "currency": "EUR"
+        }
+      ],
+      "photos": ["lp-01-01.png"],
+      "claims": ["Metall", "Glas"]
+    },
+    {
+      "id": "P11",
+      "title": "Blumentopf Ton",
+      "sourceRows": [26, 27, 97, 110],
+      "variants": [
+        {
+          "row": 26,
+          "sku": "TT-30",
+          "priceCents": 1495,
+          "currency": "EUR"
+        }
+      ],
+      "photos": ["tt-30-01.png"],
+      "claims": ["Handgefertigt"]
+    },
+    {
+      "id": "P12",
+      "title": "Seifenkiste Holz",
+      "sourceRows": [28, 29, 30],
+      "variants": [
+        {
+          "row": 28,
+          "sku": null,
+          "priceCents": 8900,
+          "currency": "EUR",
+          "attributes": {
+            "Farbe": "Naturblau"
+          }
+        },
+        {
+          "row": 29,
+          "sku": null,
+          "priceCents": 8900,
+          "currency": "EUR",
+          "attributes": {
+            "Farbe": "Naturrot"
+          }
+        },
+        {
+          "row": 30,
+          "sku": null,
+          "priceCents": 8900,
+          "currency": "EUR",
+          "attributes": {
+            "Farbe": "Naturgrün"
+          }
+        }
+      ],
+      "photos": ["seifenkiste-01.png"],
+      "needsReview": true,
+      "claims": ["Handgebaut", "Belastung bis 50 kg"]
+    },
+    {
+      "id": "P13",
+      "title": "Laterne Borna",
+      "sourceRows": [31, 32],
+      "variants": [
+        {
+          "row": 31,
+          "sku": "LB-7",
+          "priceCents": 2200,
+          "currency": "EUR"
+        }
+      ],
+      "photos": ["lb-7-01.png"]
+    },
+    {
+      "id": "P14",
+      "title": "Deko-Kranz Eukalyptus",
+      "sourceRows": [33, 115],
+      "variants": [
+        {
+          "row": 33,
+          "sku": "XX-99",
+          "priceCents": null,
+          "currency": null
+        }
+      ],
+      "photos": [],
+      "needsReview": true
+    },
+    {
+      "id": "P15",
+      "title": "Blumenkübel Zink Ø 60 cm",
+      "sourceRows": [34, 35, 36],
+      "variants": [
+        {
+          "row": 34,
+          "sku": "KB-60",
+          "priceCents": 3250,
+          "currency": "EUR"
+        }
+      ],
+      "photos": ["kb-60-01.png"],
+      "claims": ["Zink", "verzinkt"]
+    },
+    {
+      "id": "P16",
+      "title": "Gartenliege Alu",
+      "sourceRows": [37, 38],
+      "variants": [
+        {
+          "row": 37,
+          "sku": "012345678905",
+          "priceCents": 8990,
+          "currency": "EUR"
+        }
+      ],
+      "photos": []
+    },
+    {
+      "id": "P17",
+      "title": "Gartenliege Auflage",
+      "sourceRows": [39],
+      "variants": [
+        {
+          "row": 39,
+          "sku": "456789",
+          "priceCents": 2990,
+          "currency": "EUR"
+        }
+      ],
+      "photos": ["gl-auf.png"]
+    },
+    {
+      "id": "P18",
+      "title": "Kerzen Set 6er Pack",
+      "sourceRows": [40, 41, 116],
+      "variants": [
+        {
+          "row": 40,
+          "sku": "KL-6",
+          "priceCents": 695,
+          "currency": "EUR"
+        }
+      ],
+      "photos": ["kl-6-01.png"]
+    },
+    {
+      "id": "P19",
+      "title": "Strohhut Sommer",
+      "sourceRows": [42, 43, 44, 45, 106],
+      "variants": [
+        {
+          "row": 42,
+          "sku": "SH-M",
+          "priceCents": 2400,
+          "currency": "EUR",
+          "attributes": {
+            "Größe": "M"
+          }
+        },
+        {
+          "row": 43,
+          "sku": "SH-L",
+          "priceCents": 2400,
+          "currency": "EUR",
+          "attributes": {
+            "Größe": "L"
+          }
+        },
+        {
+          "row": 44,
+          "sku": "SH-XL",
+          "priceCents": 2400,
+          "currency": "EUR",
+          "attributes": {
+            "Größe": "XL"
+          }
+        }
+      ],
+      "photos": ["strohhut-01.png"]
+    },
+    {
+      "id": "P20",
+      "title": "Vase Glas Amber",
+      "sourceRows": [46, 47],
+      "variants": [
+        {
+          "row": 46,
+          "sku": "VS-9",
+          "priceCents": 2750,
+          "currency": "EUR"
+        }
+      ],
+      "photos": ["vs-9-01.png"],
+      "claims": ["Mundgeblasen"]
+    },
+    {
+      "id": "P21",
+      "title": "Pavillon Premium",
+      "sourceRows": [48, 101, 114],
+      "variants": [
+        {
+          "row": 48,
+          "sku": "AQ-1",
+          "priceCents": null,
+          "currency": null
+        }
+      ],
+      "photos": [],
+      "needsReview": true
+    },
+    {
+      "id": "P22",
+      "title": "Thermometer Analog",
+      "sourceRows": [49, 50],
+      "variants": [
+        {
+          "row": 49,
+          "sku": "TH-5",
+          "priceCents": 1250,
+          "currency": "EUR"
+        }
+      ],
+      "photos": ["th-5-01.png"]
+    },
+    {
+      "id": "P23",
+      "title": "Lounge-Liege Teak High-End",
+      "sourceRows": [51],
+      "variants": [
+        {
+          "row": 51,
+          "sku": "LL-1",
+          "priceCents": 129900,
+          "currency": "EUR"
+        }
+      ],
+      "photos": []
+    },
+    {
+      "id": "P24",
+      "title": "Esstisch Eiche massiv",
+      "sourceRows": [52, 96, 109],
+      "variants": [
+        {
+          "row": 52,
+          "sku": "ES-9",
+          "priceCents": 129900,
+          "currency": "EUR"
+        }
+      ],
+      "photos": ["es-9-01.png"]
+    },
+    {
+      "id": "P25",
+      "title": "Wanddeko Metall",
+      "sourceRows": [53, 54],
+      "variants": [
+        {
+          "row": 53,
+          "sku": "WA-3",
+          "priceCents": 4400,
+          "currency": "EUR"
+        }
+      ],
+      "photos": ["wa-3-01.png"],
+      "claims": ["Handarbeit aus Metall"]
+    },
+    {
+      "id": "P26",
+      "title": "Blumentopf Palma",
+      "sourceRows": [55, 56],
+      "variants": [
+        {
+          "row": 55,
+          "sku": "BP-8",
+          "priceCents": 999,
+          "currency": "EUR"
+        }
+      ],
+      "photos": ["bp-8-01.png"]
+    },
+    {
+      "id": "P27",
+      "title": "Gewächshaus Ruby",
+      "sourceRows": [57, 94, 107],
+      "variants": [
+        {
+          "row": 57,
+          "sku": "GE-1",
+          "priceCents": 19900,
+          "currency": "EUR"
+        }
+      ],
+      "photos": ["ge-1-01.png"]
+    },
+    {
+      "id": "P28",
+      "title": "Gewächshaus Ruby XL",
+      "sourceRows": [58, 59],
+      "variants": [
+        {
+          "row": 58,
+          "sku": "GE-2",
+          "priceCents": null,
+          "currency": null
+        }
+      ],
+      "photos": ["ge-2-01.png"],
+      "needsReview": true
+    },
+    {
+      "id": "P29",
+      "title": "Gartenschlauch Aufroller",
+      "sourceRows": [60, 61, 62, 119],
+      "variants": [
+        {
+          "row": 60,
+          "sku": "GK-2",
+          "priceCents": 7900,
+          "currency": "EUR"
+        }
+      ],
+      "photos": ["gk-2-01.png"]
+    },
+    {
+      "id": "P30",
+      "title": "Regentonne 100 L",
+      "sourceRows": [63, 64, 65],
+      "variants": [
+        {
+          "row": 63,
+          "sku": "RB-100",
+          "priceCents": 5900,
+          "currency": "EUR"
+        }
+      ],
+      "photos": ["rb-100-01.png"]
+    },
+    {
+      "id": "P31",
+      "title": "Mikrofaser-Decke",
+      "sourceRows": [66, 67, 100, 113],
+      "variants": [
+        {
+          "row": 66,
+          "sku": "MI-1",
+          "priceCents": 1490,
+          "currency": "EUR"
+        }
+      ],
+      "photos": ["mi-1-01.png"]
+    },
+    {
+      "id": "P32",
+      "title": "Hochbeet Lärche 120 cm",
+      "sourceRows": [71, 72, 73, 117],
+      "variants": [
+        {
+          "row": 71,
+          "sku": "HB-120",
+          "priceCents": 12900,
+          "currency": "EUR"
+        }
+      ],
+      "photos": ["hb-120-01.png"],
+      "claims": ["Lärchenholz", "unbehandelt"]
+    },
+    {
+      "id": "P33",
+      "title": "Zierkissen Velvet 40x40",
+      "sourceRows": [68, 69, 70, 74, 75, 99, 112],
+      "variants": [
+        {
+          "row": 68,
+          "sku": "KV-40-BLA",
+          "priceCents": 1290,
+          "currency": "EUR",
+          "attributes": {
+            "Farbe": "Blau"
+          }
+        },
+        {
+          "row": 69,
+          "sku": "KV-40-GRU",
+          "priceCents": 1290,
+          "currency": "EUR",
+          "attributes": {
+            "Farbe": "Grün"
+          }
+        },
+        {
+          "row": 70,
+          "sku": "KV-40-ROS",
+          "priceCents": 1290,
+          "currency": "EUR",
+          "attributes": {
+            "Farbe": "Rosa"
+          }
+        }
+      ],
+      "photos": ["kissen-01.png"]
+    },
+    {
+      "id": "P34",
+      "title": "Solarleuchte Set 2er",
+      "sourceRows": [76, 77, 78],
+      "variants": [
+        {
+          "row": 76,
+          "sku": "SL-2",
+          "priceCents": 2990,
+          "currency": "EUR"
+        }
+      ],
+      "photos": ["sl-2-01.png"],
+      "claims": ["LED", "warmweiß", "mit Erdspieß"]
+    },
+    {
+      "id": "P35",
+      "title": "Solarleuchte Set 4er",
+      "sourceRows": [120],
+      "variants": [
+        {
+          "row": 120,
+          "sku": "SL-4",
+          "priceCents": 4990,
+          "currency": "EUR"
+        }
+      ],
+      "photos": []
+    },
+    {
+      "id": "P36",
+      "title": "Teaköl 1 L",
+      "sourceRows": [79, 80, 118],
+      "variants": [
+        {
+          "row": 79,
+          "sku": "TO-1",
+          "priceCents": 1690,
+          "currency": "EUR"
+        }
+      ],
+      "photos": ["to-1-01.png"],
+      "claims": ["Pflegt und schützt Teakholz"]
+    },
+    {
+      "id": "P37",
+      "title": "Hundekorb Velvet",
+      "sourceRows": [81, 82, 83, 84],
+      "variants": [
+        {
+          "row": 81,
+          "sku": "HK-M",
+          "priceCents": 3490,
+          "currency": "EUR",
+          "attributes": {
+            "Größe": "M"
+          }
+        },
+        {
+          "row": 82,
+          "sku": "HK-L",
+          "priceCents": 4490,
+          "currency": "EUR",
+          "attributes": {
+            "Größe": "L"
+          }
+        }
+      ],
+      "photos": ["hk-l-01.png"],
+      "claims": ["Waschbar bei 30 °C"]
+    },
+    {
+      "id": "P38",
+      "title": "Grillabdeckung 145 cm",
+      "sourceRows": [85, 86, 87, 98, 111],
+      "variants": [
+        {
+          "row": 85,
+          "sku": "GA-60",
+          "priceCents": 2490,
+          "currency": "EUR"
+        }
+      ],
+      "photos": ["ga-60-01.png"],
+      "claims": ["Wetterfeste Schutzhülle"]
+    },
+    {
+      "id": "P39",
+      "title": "Gartenstecker Herz",
+      "sourceRows": [88, 89],
+      "variants": [
+        {
+          "row": 88,
+          "sku": null,
+          "priceCents": 890,
+          "currency": "EUR",
+          "attributes": {
+            "Farbe": "Rost"
+          }
+        }
+      ],
+      "photos": [],
+      "needsReview": true,
+      "claims": ["Metall", "rostbraun"]
+    }
+  ],
+  "quantities": [
+    {
+      "row": 4,
+      "column": "Länge (cm)",
+      "value": 500,
+      "unit": "mm"
+    },
+    {
+      "row": 5,
+      "column": "Länge (cm)",
+      "value": 500,
+      "unit": "mm"
+    },
+    {
+      "row": 6,
+      "column": "Länge (cm)",
+      "value": 500,
+      "unit": "mm"
+    },
+    {
+      "row": 7,
+      "column": "Länge (cm)",
+      "value": 500,
+      "unit": "mm"
+    },
+    {
+      "row": 103,
+      "column": "Länge (cm)",
+      "value": 500,
+      "unit": "mm"
+    },
+    {
+      "row": 19,
+      "column": "Länge (cm)",
+      "value": 1500,
+      "unit": "mm"
+    },
+    {
+      "row": 20,
+      "column": "Länge (cm)",
+      "value": 1500,
+      "unit": "mm"
+    },
+    {
+      "row": 21,
+      "column": "Länge (cm)",
+      "value": 1500,
+      "unit": "mm"
+    },
+    {
+      "row": 102,
+      "column": "Länge (cm)",
+      "value": 1500,
+      "unit": "mm"
+    },
+    {
+      "row": 22,
+      "column": "Länge (cm)",
+      "value": 1499,
+      "unit": "mm"
+    },
+    {
+      "row": 26,
+      "column": "Länge (cm)",
+      "value": 300,
+      "unit": "mm"
+    },
+    {
+      "row": 27,
+      "column": "Länge (cm)",
+      "value": 300,
+      "unit": "mm"
+    },
+    {
+      "row": 97,
+      "column": "Länge (cm)",
+      "value": 300,
+      "unit": "mm"
+    },
+    {
+      "row": 110,
+      "column": "Länge (cm)",
+      "value": 300,
+      "unit": "mm"
+    },
+    {
+      "row": 34,
+      "column": "Länge (cm)",
+      "value": 600,
+      "unit": "mm"
+    },
+    {
+      "row": 35,
+      "column": "Länge (cm)",
+      "value": 600,
+      "unit": "mm"
+    },
+    {
+      "row": 36,
+      "column": "Länge (cm)",
+      "value": 600,
+      "unit": "mm"
+    },
+    {
+      "row": 55,
+      "column": "Länge (cm)",
+      "value": 240,
+      "unit": "mm"
+    },
+    {
+      "row": 56,
+      "column": "Länge (cm)",
+      "value": 240,
+      "unit": "mm"
+    },
+    {
+      "row": 71,
+      "column": "Länge (cm)",
+      "value": 1200,
+      "unit": "mm"
+    },
+    {
+      "row": 72,
+      "column": "Länge (cm)",
+      "value": 1200,
+      "unit": "mm"
+    },
+    {
+      "row": 73,
+      "column": "Länge (cm)",
+      "value": 1200,
+      "unit": "mm"
+    },
+    {
+      "row": 117,
+      "column": "Länge (cm)",
+      "value": 1200,
+      "unit": "mm"
+    },
+    {
+      "row": 76,
+      "column": "Länge (cm)",
+      "value": 270,
+      "unit": "mm"
+    },
+    {
+      "row": 77,
+      "column": "Länge (cm)",
+      "value": 270,
+      "unit": "mm"
+    },
+    {
+      "row": 78,
+      "column": "Länge (cm)",
+      "value": 270,
+      "unit": "mm"
+    },
+    {
+      "row": 120,
+      "column": "Länge (cm)",
+      "value": 270,
+      "unit": "mm"
+    },
+    {
+      "row": 4,
+      "column": "Gewicht (kg)",
+      "value": 6200,
+      "unit": "g"
+    },
+    {
+      "row": 5,
+      "column": "Gewicht (kg)",
+      "value": 6200,
+      "unit": "g"
+    },
+    {
+      "row": 103,
+      "column": "Gewicht (kg)",
+      "value": 6200,
+      "unit": "g"
+    },
+    {
+      "row": 6,
+      "column": "Gewicht (kg)",
+      "value": 6400,
+      "unit": "g"
+    },
+    {
+      "row": 7,
+      "column": "Gewicht (kg)",
+      "value": 6400,
+      "unit": "g"
+    },
+    {
+      "row": 13,
+      "column": "Gewicht (kg)",
+      "value": 800,
+      "unit": "g"
+    },
+    {
+      "row": 14,
+      "column": "Gewicht (kg)",
+      "value": 800,
+      "unit": "g"
+    },
+    {
+      "row": 104,
+      "column": "Gewicht (kg)",
+      "value": 800,
+      "unit": "g"
+    },
+    {
+      "row": 23,
+      "column": "Gewicht (kg)",
+      "value": 9500,
+      "unit": "g"
+    },
+    {
+      "row": 95,
+      "column": "Gewicht (kg)",
+      "value": 9500,
+      "unit": "g"
+    },
+    {
+      "row": 108,
+      "column": "Gewicht (kg)",
+      "value": 9500,
+      "unit": "g"
+    },
+    {
+      "row": 26,
+      "column": "Gewicht (kg)",
+      "value": 3300,
+      "unit": "g"
+    },
+    {
+      "row": 27,
+      "column": "Gewicht (kg)",
+      "value": 3300,
+      "unit": "g"
+    },
+    {
+      "row": 97,
+      "column": "Gewicht (kg)",
+      "value": 3300,
+      "unit": "g"
+    },
+    {
+      "row": 110,
+      "column": "Gewicht (kg)",
+      "value": 3300,
+      "unit": "g"
+    },
+    {
+      "row": 31,
+      "column": "Gewicht (kg)",
+      "value": 1400,
+      "unit": "g"
+    },
+    {
+      "row": 32,
+      "column": "Gewicht (kg)",
+      "value": 1400,
+      "unit": "g"
+    },
+    {
+      "row": 33,
+      "column": "Gewicht (kg)",
+      "value": 500,
+      "unit": "g"
+    },
+    {
+      "row": 115,
+      "column": "Gewicht (kg)",
+      "value": 500,
+      "unit": "g"
+    },
+    {
+      "row": 34,
+      "column": "Gewicht (kg)",
+      "value": 7100,
+      "unit": "g"
+    },
+    {
+      "row": 35,
+      "column": "Gewicht (kg)",
+      "value": 7100,
+      "unit": "g"
+    },
+    {
+      "row": 36,
+      "column": "Gewicht (kg)",
+      "value": 7100,
+      "unit": "g"
+    },
+    {
+      "row": 37,
+      "column": "Gewicht (kg)",
+      "value": 8200,
+      "unit": "g"
+    },
+    {
+      "row": 38,
+      "column": "Gewicht (kg)",
+      "value": 8200,
+      "unit": "g"
+    },
+    {
+      "row": 39,
+      "column": "Gewicht (kg)",
+      "value": 2000,
+      "unit": "g"
+    },
+    {
+      "row": 40,
+      "column": "Gewicht (kg)",
+      "value": 600,
+      "unit": "g"
+    },
+    {
+      "row": 41,
+      "column": "Gewicht (kg)",
+      "value": 600,
+      "unit": "g"
+    },
+    {
+      "row": 116,
+      "column": "Gewicht (kg)",
+      "value": 600,
+      "unit": "g"
+    },
+    {
+      "row": 46,
+      "column": "Gewicht (kg)",
+      "value": 1200,
+      "unit": "g"
+    },
+    {
+      "row": 47,
+      "column": "Gewicht (kg)",
+      "value": 1200,
+      "unit": "g"
+    },
+    {
+      "row": 49,
+      "column": "Gewicht (kg)",
+      "value": 300,
+      "unit": "g"
+    },
+    {
+      "row": 50,
+      "column": "Gewicht (kg)",
+      "value": 300,
+      "unit": "g"
+    },
+    {
+      "row": 51,
+      "column": "Gewicht (kg)",
+      "value": 18500,
+      "unit": "g"
+    },
+    {
+      "row": 52,
+      "column": "Gewicht (kg)",
+      "value": 62000,
+      "unit": "g"
+    },
+    {
+      "row": 96,
+      "column": "Gewicht (kg)",
+      "value": 62000,
+      "unit": "g"
+    },
+    {
+      "row": 109,
+      "column": "Gewicht (kg)",
+      "value": 62000,
+      "unit": "g"
+    },
+    {
+      "row": 53,
+      "column": "Gewicht (kg)",
+      "value": 2400,
+      "unit": "g"
+    },
+    {
+      "row": 54,
+      "column": "Gewicht (kg)",
+      "value": 2400,
+      "unit": "g"
+    },
+    {
+      "row": 55,
+      "column": "Gewicht (kg)",
+      "value": 1100,
+      "unit": "g"
+    },
+    {
+      "row": 56,
+      "column": "Gewicht (kg)",
+      "value": 1100,
+      "unit": "g"
+    },
+    {
+      "row": 57,
+      "column": "Gewicht (kg)",
+      "value": 35000,
+      "unit": "g"
+    },
+    {
+      "row": 94,
+      "column": "Gewicht (kg)",
+      "value": 35000,
+      "unit": "g"
+    },
+    {
+      "row": 107,
+      "column": "Gewicht (kg)",
+      "value": 35000,
+      "unit": "g"
+    },
+    {
+      "row": 58,
+      "column": "Gewicht (kg)",
+      "value": 48000,
+      "unit": "g"
+    },
+    {
+      "row": 59,
+      "column": "Gewicht (kg)",
+      "value": 48000,
+      "unit": "g"
+    },
+    {
+      "row": 60,
+      "column": "Gewicht (kg)",
+      "value": 7500,
+      "unit": "g"
+    },
+    {
+      "row": 61,
+      "column": "Gewicht (kg)",
+      "value": 7500,
+      "unit": "g"
+    },
+    {
+      "row": 62,
+      "column": "Gewicht (kg)",
+      "value": 7500,
+      "unit": "g"
+    },
+    {
+      "row": 119,
+      "column": "Gewicht (kg)",
+      "value": 7500,
+      "unit": "g"
+    },
+    {
+      "row": 63,
+      "column": "Gewicht (kg)",
+      "value": 12500,
+      "unit": "g"
+    },
+    {
+      "row": 64,
+      "column": "Gewicht (kg)",
+      "value": 12500,
+      "unit": "g"
+    },
+    {
+      "row": 65,
+      "column": "Gewicht (kg)",
+      "value": 12500,
+      "unit": "g"
+    },
+    {
+      "row": 66,
+      "column": "Gewicht (kg)",
+      "value": 1000,
+      "unit": "g"
+    },
+    {
+      "row": 100,
+      "column": "Gewicht (kg)",
+      "value": 1000,
+      "unit": "g"
+    },
+    {
+      "row": 113,
+      "column": "Gewicht (kg)",
+      "value": 1000,
+      "unit": "g"
+    },
+    {
+      "row": 79,
+      "column": "Gewicht (kg)",
+      "value": 950,
+      "unit": "g"
+    },
+    {
+      "row": 80,
+      "column": "Gewicht (kg)",
+      "value": 950,
+      "unit": "g"
+    },
+    {
+      "row": 118,
+      "column": "Gewicht (kg)",
+      "value": 950,
+      "unit": "g"
+    },
+    {
+      "row": 81,
+      "column": "Gewicht (kg)",
+      "value": 1800,
+      "unit": "g"
+    },
+    {
+      "row": 83,
+      "column": "Gewicht (kg)",
+      "value": 1800,
+      "unit": "g"
+    },
+    {
+      "row": 82,
+      "column": "Gewicht (kg)",
+      "value": 2600,
+      "unit": "g"
+    },
+    {
+      "row": 84,
+      "column": "Gewicht (kg)",
+      "value": 2600,
+      "unit": "g"
+    },
+    {
+      "row": 85,
+      "column": "Gewicht (kg)",
+      "value": 1200,
+      "unit": "g"
+    },
+    {
+      "row": 86,
+      "column": "Gewicht (kg)",
+      "value": 1200,
+      "unit": "g"
+    },
+    {
+      "row": 87,
+      "column": "Gewicht (kg)",
+      "value": 1200,
+      "unit": "g"
+    },
+    {
+      "row": 98,
+      "column": "Gewicht (kg)",
+      "value": 1200,
+      "unit": "g"
+    },
+    {
+      "row": 111,
+      "column": "Gewicht (kg)",
+      "value": 1200,
+      "unit": "g"
+    },
+    {
+      "row": 88,
+      "column": "Gewicht (kg)",
+      "value": 400,
+      "unit": "g"
+    },
+    {
+      "row": 89,
+      "column": "Gewicht (kg)",
+      "value": 400,
+      "unit": "g"
+    },
+    {
+      "row": 63,
+      "column": "Volumen (l)",
+      "value": 100000,
+      "unit": "ml"
+    },
+    {
+      "row": 64,
+      "column": "Volumen (l)",
+      "value": 100000,
+      "unit": "ml"
+    },
+    {
+      "row": 65,
+      "column": "Volumen (l)",
+      "value": 100000,
+      "unit": "ml"
+    }
+  ],
+  "parkedPhotos": [
+    "IMG_4472.PNG",
+    "dsc00042.png",
+    "p1000031.png",
+    "scan012.png"
+  ]
+}

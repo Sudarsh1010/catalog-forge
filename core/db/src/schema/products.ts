@@ -2,9 +2,12 @@
 // Product, Variant, Natural Key).
 //
 // Duplicate prevention is a database guarantee (EC-068): the Natural Key is
-// scoped to the Import (the sheet's source — the same supplier code from two
-// sources stays two Products, EC-032) and protected by a unique index, with
-// upsert semantics in the handler. The readable key travels beside its
+// scoped to the sheet family (the re-upload lineage — the same supplier code
+// from two different sheets stays two Products, EC-032) and protected by a
+// unique index, with upsert semantics in the handler. A re-import of the same
+// family ADOPTS the existing Product instead of appending one, so re-uploads
+// patch the catalog and never duplicate it.
+// The readable key travels beside its
 // sha256 so dashboards can show identity without recomputing it.
 import {
   boolean,
@@ -43,6 +46,12 @@ export const products = pgTable(
     importId: uuid("import_id")
       .notNull()
       .references(() => imports.id, { onDelete: "cascade" }),
+    /**
+     * The sheet family this Product belongs to (the Import's `family_key`).
+     * Adoption on re-import keeps a Product's birth `import_id`, so the
+     * family — not the Import — is the dedupe scope below.
+     */
+    familyKey: text("family_key").notNull(),
     identityKind: productIdentityKind("identity_kind").notNull(),
     /** Readable canonical key, e.g. `sku:tp-100` or `title:gießkanne 5 l`. */
     naturalKey: text("natural_key").notNull(),
@@ -66,11 +75,13 @@ export const products = pgTable(
       .defaultNow(),
   },
   (t) => [
-    // EC-068: at most one Product per scoped Natural Key — the DB, not app
-    // logic, resolves races; the barrier's upserts converge on re-run.
-    uniqueIndex("products_natural_key_key").on(
+    // EC-068: at most one Product per (family, Natural Key) — the DB, not
+    // app logic, resolves races; the barrier's upserts and the key-diff's
+    // adoption converge on re-run and re-import. Family-scoped, not
+    // Import-scoped: a re-upload updates its predecessor's Product.
+    uniqueIndex("products_natural_key_family_key").on(
       t.storeId,
-      t.importId,
+      t.familyKey,
       t.naturalKeyHash
     ),
     index("products_import_idx").on(t.importId),
@@ -116,6 +127,15 @@ export const variants = pgTable(
     imageRef: text("image_ref"),
     /** First Sheet Row that carried this Variant (audit trail). */
     sourceRowIndex: integer("source_row_index").notNull(),
+    /**
+     * Missing-from-Source (GLOSSARY): the Variant existed in this sheet
+     * family's catalog but is absent from the latest re-import. Never
+     * deleted automatically — the merchant decides its fate. Cleared when a
+     * later re-import carries the Variant again.
+     */
+    missingFromSource: boolean("missing_from_source").notNull().default(false),
+    /** When the latest re-import noticed the Variant missing. */
+    missingSince: timestamp("missing_since", { withTimezone: true }),
     needsReview: boolean("needs_review").notNull().default(false),
     reviewReason: text("review_reason"),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -129,6 +149,8 @@ export const variants = pgTable(
     // Idempotent grouping (ADR-0003): re-running the barrier upserts, never appends.
     uniqueIndex("variants_identity_key").on(t.productId, t.variantKeyHash),
     index("variants_import_idx").on(t.importId),
+    // Missing-from-Source surfacing (GLOSSARY): the merchant's decide-fate list.
+    index("variants_missing_idx").on(t.storeId, t.missingFromSource),
   ]
 )
 

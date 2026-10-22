@@ -19,7 +19,7 @@ import type { Database } from "@workspace/db"
 import type { Import, NewImportFile } from "@workspace/db/schema"
 import { importFiles, imports } from "@workspace/db/schema"
 import type { Storage } from "@workspace/storage"
-import { DEFAULT_STORE_ID } from "@workspace/pipeline"
+import { DEFAULT_STORE_ID, familyKeyOf } from "@workspace/pipeline"
 
 import { getDb } from "@/lib/db"
 import { toImportDto } from "@/lib/imports"
@@ -255,6 +255,10 @@ export async function POST(request: Request): Promise<Response> {
         .values({
           storeId,
           contentHash: sheet.sha256!,
+          // Sheet lineage for re-import key-diff (GLOSSARY: Fast Path,
+          // Missing-from-Source): a changed re-upload of this file joins the
+          // family and updates its predecessor's catalog.
+          familyKey: familyKeyOf(safeFilename(sheet.filename)),
           originalFilename: safeFilename(sheet.filename),
           sheetFormat: sheet.filename.toLowerCase().endsWith(".xlsx")
             ? "xlsx"

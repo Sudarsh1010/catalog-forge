@@ -1,0 +1,9 @@
+{
+  "$comment": "Layer 1 CI gate: exact-match hit/total floors per field, set from the recorded baseline (RESULTS.md). Lowering a floor needs a written reason in RESULTS.md; raising one after a pipeline fix is encouraged.",
+  "grouping": { "hit": 36, "total": 39 },
+  "dedupe": { "hit": 37, "total": 39 },
+  "price": { "hit": 47, "total": 49 },
+  "units": { "hit": 98, "total": 99 },
+  "photos": { "hit": 29, "total": 35 },
+  "review": { "hit": 34, "total": 39 }
+}
