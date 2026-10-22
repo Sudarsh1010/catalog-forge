@@ -16,17 +16,15 @@
  * duplicates. Stage advancement and the enrich/translate fan-out happen in
  * the Job machinery's completion transaction, not here.
  */
-import { asc, eq, sql } from "drizzle-orm"
+import { eq, sql } from "drizzle-orm"
 
 import type { Database } from "@workspace/db"
 import type { CleanColumnPlan, CleanedCell } from "@workspace/db/schema"
 import {
   cleanPlans,
-  cleanedRows,
   imports,
   products,
   rowLedger,
-  sheetRows,
   variants,
 } from "@workspace/db/schema"
 import { createLogger } from "@workspace/log"
@@ -627,7 +625,7 @@ async function writeCatalog(
       const upserted = await tx
         .insert(variants)
         .values(
-          batch.map(({ draft, variant, productId }) => ({
+          batch.map(({ variant, productId }) => ({
             storeId,
             importId,
             productId,
