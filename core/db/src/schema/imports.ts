@@ -55,6 +55,14 @@ export const imports = pgTable(
     rowCount: integer("row_count"),
     /** Why the Import Failed — merchant-fixable, references the EC class. */
     failureReason: text("failure_reason"),
+    /**
+     * Pause surface (GLOSSARY: Pause — "Paused — resuming in X minutes"):
+     * when a provider throttles us, Imports holding that provider's Jobs flip
+     * to `status = 'paused'` with the resume timestamp the dashboard counts
+     * down to. Resumes automatically on schedule; both columns clear.
+     */
+    pausedUntil: timestamp("paused_until", { withTimezone: true }),
+    pausedProviderId: text("paused_provider_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
