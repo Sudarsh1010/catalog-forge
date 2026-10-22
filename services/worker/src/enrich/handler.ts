@@ -302,10 +302,12 @@ async function enrichProduct(
     ...(sourceRowValues !== undefined ? { sourceRowValues } : {}),
   }
 
+  const enrichStartedAt = Date.now()
   const call = await registry.run(
     tier ?? routingTierFor(input.messiness),
     (provider) => provider.enrich(input)
   )
+  const enrichDurationMs = Date.now() - enrichStartedAt
 
   const effective = await upsertEnrichment(
     db,
@@ -330,6 +332,7 @@ async function enrichProduct(
     tokensIn: call.usage.tokensIn,
     tokensOut: call.usage.tokensOut,
     costMicros: costMicrosFor(call.usage),
+    durationMs: enrichDurationMs,
   })
 }
 

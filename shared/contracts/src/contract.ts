@@ -13,6 +13,7 @@ import {
   ImportDetailSchema,
   ImportDtoSchema,
   ImportIdSchema,
+  MetricsOverviewSchema,
   ProductConfidenceFilterSchema,
   ProductDetailSchema,
   ProductEditFieldsSchema,
@@ -173,7 +174,14 @@ const productContract = {
 }
 
 /** The full oRPC contract tree served by the app's procedures. */
-export const contract = { import: importContract, product: productContract }
+export const contract = {
+  import: importContract,
+  product: productContract,
+  /** Metrics tab (ticket #19): every block reads one Postgres view. */
+  metrics: {
+    overview: oc.output(MetricsOverviewSchema),
+  },
+}
 
 /** Client type helper (stable v1 name) so consumers can type oRPC clients. */
 export type ClientContract = ContractRouterClient<typeof contract>

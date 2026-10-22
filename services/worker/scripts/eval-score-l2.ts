@@ -22,6 +22,7 @@
  * Run: `pnpm --filter @workspace/worker eval:l2`
  * (`OPENAI_API_KEY=sk-… EVAL_L2_SAMPLE=12` — sample size defaults to 12).
  */
+import path from "node:path"
 import { pathToFileURL } from "node:url"
 
 import { openAIProviderEntries } from "../src/provider/openai.js"

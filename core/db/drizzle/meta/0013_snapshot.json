@@ -1,6 +1,6 @@
 {
-  "id": "2c1a9a5a-d30d-4c49-ac38-63f43e0c8994",
-  "prevId": "d4ca0529-abb7-42f3-8786-84e2018ee101",
+  "id": "9db6c7c9-9ee6-47cd-b5a7-c5350371a4c7",
+  "prevId": "da5320ae-3060-45d8-952f-98b0e44e4331",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -137,9 +137,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "jobs_claim_idx": {
           "name": "jobs_claim_idx",
@@ -158,9 +158,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "jobs_provider_idx": {
           "name": "jobs_provider_idx",
@@ -173,9 +173,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -311,9 +311,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "imports_adoption_idx": {
           "name": "imports_adoption_idx",
@@ -332,9 +332,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "imports_family_idx": {
           "name": "imports_family_idx",
@@ -359,9 +359,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -439,9 +439,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "provider_pauses_resume_idx": {
           "name": "provider_pauses_resume_idx",
@@ -454,9 +454,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -515,9 +515,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "job_retries_adoption_idx": {
           "name": "job_retries_adoption_idx",
@@ -530,29 +530,29 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "job_retries_import_id_imports_id_fk": {
           "name": "job_retries_import_id_imports_id_fk",
           "tableFrom": "job_retries",
-          "tableTo": "imports",
           "columnsFrom": ["import_id"],
+          "tableTo": "imports",
           "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "job_retries_job_id_jobs_id_fk": {
           "name": "job_retries_job_id_jobs_id_fk",
           "tableFrom": "job_retries",
-          "tableTo": "jobs",
           "columnsFrom": ["job_id"],
+          "tableTo": "jobs",
           "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -624,20 +624,20 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "reruns_import_id_imports_id_fk": {
           "name": "reruns_import_id_imports_id_fk",
           "tableFrom": "reruns",
-          "tableTo": "imports",
           "columnsFrom": ["import_id"],
+          "tableTo": "imports",
           "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -732,9 +732,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "import_files_import_idx": {
           "name": "import_files_import_idx",
@@ -753,20 +753,20 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "import_files_import_id_imports_id_fk": {
           "name": "import_files_import_id_imports_id_fk",
           "tableFrom": "import_files",
-          "tableTo": "imports",
           "columnsFrom": ["import_id"],
+          "tableTo": "imports",
           "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -836,20 +836,20 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "sheet_rows_import_id_imports_id_fk": {
           "name": "sheet_rows_import_id_imports_id_fk",
           "tableFrom": "sheet_rows",
-          "tableTo": "imports",
           "columnsFrom": ["import_id"],
+          "tableTo": "imports",
           "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -900,11 +900,11 @@
         "clean_plans_import_id_imports_id_fk": {
           "name": "clean_plans_import_id_imports_id_fk",
           "tableFrom": "clean_plans",
-          "tableTo": "imports",
           "columnsFrom": ["import_id"],
+          "tableTo": "imports",
           "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -988,9 +988,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "cleaned_rows_flags_idx": {
           "name": "cleaned_rows_flags_idx",
@@ -1003,20 +1003,20 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "gin",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "cleaned_rows_import_id_imports_id_fk": {
           "name": "cleaned_rows_import_id_imports_id_fk",
           "tableFrom": "cleaned_rows",
-          "tableTo": "imports",
           "columnsFrom": ["import_id"],
+          "tableTo": "imports",
           "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -1155,9 +1155,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "products_import_idx": {
           "name": "products_import_idx",
@@ -1170,20 +1170,20 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "products_import_id_imports_id_fk": {
           "name": "products_import_id_imports_id_fk",
           "tableFrom": "products",
-          "tableTo": "imports",
           "columnsFrom": ["import_id"],
+          "tableTo": "imports",
           "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -1335,9 +1335,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "variants_import_idx": {
           "name": "variants_import_idx",
@@ -1350,9 +1350,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "variants_missing_idx": {
           "name": "variants_missing_idx",
@@ -1371,29 +1371,29 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "variants_import_id_imports_id_fk": {
           "name": "variants_import_id_imports_id_fk",
           "tableFrom": "variants",
-          "tableTo": "imports",
           "columnsFrom": ["import_id"],
+          "tableTo": "imports",
           "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "variants_product_id_products_id_fk": {
           "name": "variants_product_id_products_id_fk",
           "tableFrom": "variants",
-          "tableTo": "products",
           "columnsFrom": ["product_id"],
+          "tableTo": "products",
           "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -1495,9 +1495,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "row_ledger_import_idx": {
           "name": "row_ledger_import_idx",
@@ -1516,38 +1516,38 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "row_ledger_import_id_imports_id_fk": {
           "name": "row_ledger_import_id_imports_id_fk",
           "tableFrom": "row_ledger",
-          "tableTo": "imports",
           "columnsFrom": ["import_id"],
+          "tableTo": "imports",
           "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "row_ledger_product_id_products_id_fk": {
           "name": "row_ledger_product_id_products_id_fk",
           "tableFrom": "row_ledger",
-          "tableTo": "products",
           "columnsFrom": ["product_id"],
+          "tableTo": "products",
           "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         },
         "row_ledger_variant_id_variants_id_fk": {
           "name": "row_ledger_variant_id_variants_id_fk",
           "tableFrom": "row_ledger",
-          "tableTo": "variants",
           "columnsFrom": ["variant_id"],
+          "tableTo": "variants",
           "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         }
       },
       "compositePrimaryKeys": {},
@@ -1630,9 +1630,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "parked_photos_import_idx": {
           "name": "parked_photos_import_idx",
@@ -1645,29 +1645,29 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "parked_photos_import_id_imports_id_fk": {
           "name": "parked_photos_import_id_imports_id_fk",
           "tableFrom": "parked_photos",
-          "tableTo": "imports",
           "columnsFrom": ["import_id"],
+          "tableTo": "imports",
           "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "parked_photos_import_file_id_import_files_id_fk": {
           "name": "parked_photos_import_file_id_import_files_id_fk",
           "tableFrom": "parked_photos",
-          "tableTo": "import_files",
           "columnsFrom": ["import_file_id"],
+          "tableTo": "import_files",
           "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -1763,9 +1763,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "product_photos_product_idx": {
           "name": "product_photos_product_idx",
@@ -1778,47 +1778,47 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "product_photos_import_id_imports_id_fk": {
           "name": "product_photos_import_id_imports_id_fk",
           "tableFrom": "product_photos",
-          "tableTo": "imports",
           "columnsFrom": ["import_id"],
+          "tableTo": "imports",
           "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "product_photos_import_file_id_import_files_id_fk": {
           "name": "product_photos_import_file_id_import_files_id_fk",
           "tableFrom": "product_photos",
-          "tableTo": "import_files",
           "columnsFrom": ["import_file_id"],
+          "tableTo": "import_files",
           "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "product_photos_product_id_products_id_fk": {
           "name": "product_photos_product_id_products_id_fk",
           "tableFrom": "product_photos",
-          "tableTo": "products",
           "columnsFrom": ["product_id"],
+          "tableTo": "products",
           "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "product_photos_variant_id_variants_id_fk": {
           "name": "product_photos_variant_id_variants_id_fk",
           "tableFrom": "product_photos",
-          "tableTo": "variants",
           "columnsFrom": ["variant_id"],
+          "tableTo": "variants",
           "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         }
       },
       "compositePrimaryKeys": {},
@@ -1964,9 +1964,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "product_enrichments_import_idx": {
           "name": "product_enrichments_import_idx",
@@ -1979,29 +1979,29 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "product_enrichments_import_id_imports_id_fk": {
           "name": "product_enrichments_import_id_imports_id_fk",
           "tableFrom": "product_enrichments",
-          "tableTo": "imports",
           "columnsFrom": ["import_id"],
+          "tableTo": "imports",
           "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "product_enrichments_product_id_products_id_fk": {
           "name": "product_enrichments_product_id_products_id_fk",
           "tableFrom": "product_enrichments",
-          "tableTo": "products",
           "columnsFrom": ["product_id"],
+          "tableTo": "products",
           "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -2117,9 +2117,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "product_translations_import_idx": {
           "name": "product_translations_import_idx",
@@ -2138,29 +2138,29 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "product_translations_import_id_imports_id_fk": {
           "name": "product_translations_import_id_imports_id_fk",
           "tableFrom": "product_translations",
-          "tableTo": "imports",
           "columnsFrom": ["import_id"],
+          "tableTo": "imports",
           "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "product_translations_product_id_products_id_fk": {
           "name": "product_translations_product_id_products_id_fk",
           "tableFrom": "product_translations",
-          "tableTo": "products",
           "columnsFrom": ["product_id"],
+          "tableTo": "products",
           "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -2241,6 +2241,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "duration_ms": {
+          "name": "duration_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -2255,9 +2261,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "provider_usage_product_idx": {
           "name": "provider_usage_product_idx",
@@ -2270,29 +2276,29 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "provider_usage_import_id_imports_id_fk": {
           "name": "provider_usage_import_id_imports_id_fk",
           "tableFrom": "provider_usage",
-          "tableTo": "imports",
           "columnsFrom": ["import_id"],
+          "tableTo": "imports",
           "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "provider_usage_product_id_products_id_fk": {
           "name": "provider_usage_product_id_products_id_fk",
           "tableFrom": "provider_usage",
-          "tableTo": "products",
           "columnsFrom": ["product_id"],
+          "tableTo": "products",
           "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         }
       },
       "compositePrimaryKeys": {},
@@ -2422,9 +2428,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "publications_handle_key": {
           "name": "publications_handle_key",
@@ -2449,9 +2455,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "publications_store_locale_idx": {
           "name": "publications_store_locale_idx",
@@ -2470,20 +2476,20 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "publications_product_id_products_id_fk": {
           "name": "publications_product_id_products_id_fk",
           "tableFrom": "publications",
-          "tableTo": "products",
           "columnsFrom": ["product_id"],
+          "tableTo": "products",
           "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -2545,13 +2551,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -2590,9 +2589,9 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "translation_memory_store_idx": {
           "name": "translation_memory_store_idx",
@@ -2611,9 +2610,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -2685,10 +2684,10 @@
     }
   },
   "schemas": {},
+  "views": {},
   "sequences": {},
   "roles": {},
   "policies": {},
-  "views": {},
   "_meta": {
     "columns": {},
     "schemas": {},

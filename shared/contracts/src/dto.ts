@@ -347,3 +347,85 @@ export const ProductEditFieldsSchema = z
     "at least one field is required"
   )
 export type ProductEditFields = z.infer<typeof ProductEditFieldsSchema>
+/**
+ * Metrics-tab read models (ticket #19): every block mirrors one Postgres
+ * view (core/db/drizzle/0013_metrics_views.sql) — the dashboard aggregates,
+ * it never re-derives from base tables.
+ */
+
+/** Row Ledger processing rates per store (view: metrics_import_rates). */
+export const MetricsRatesSchema = z.object({
+  totalRows: z.number(),
+  doneRows: z.number(),
+  needsReviewRows: z.number(),
+  failedRows: z.number(),
+  donePct: z.number(),
+  needsReviewPct: z.number(),
+  failedPct: z.number(),
+})
+export type MetricsRatesDto = z.infer<typeof MetricsRatesSchema>
+
+/** Per provider/model/operation usage (view: metrics_model_usage). */
+export const MetricsModelUsageRowSchema = z.object({
+  providerId: z.string(),
+  model: z.string(),
+  operation: z.string(),
+  calls: z.number(),
+  tokensIn: z.number(),
+  tokensOut: z.number(),
+  costMicros: z.number(),
+})
+export type MetricsModelUsageRowDto = z.infer<typeof MetricsModelUsageRowSchema>
+
+/** Cost per UTC day (view: metrics_cost_daily). */
+export const MetricsCostDaySchema = z.object({
+  day: z.string(),
+  calls: z.number(),
+  costMicros: z.number(),
+})
+export type MetricsCostDayDto = z.infer<typeof MetricsCostDaySchema>
+
+/** Average and slowest call duration per model/provider. */
+export const MetricsSpeedRowSchema = z.object({
+  providerId: z.string(),
+  model: z.string(),
+  operation: z.string(),
+  calls: z.number(),
+  avgDurationMs: z.number().nullable(),
+  slowestDurationMs: z.number().nullable(),
+})
+export type MetricsSpeedRowDto = z.infer<typeof MetricsSpeedRowSchema>
+
+/** Per-locale coverage with the Out-of-Date count. */
+export const MetricsCoverageRowSchema = z.object({
+  locale: z.string(),
+  productsEnriched: z.number(),
+  productsTranslated: z.number(),
+  fieldsTranslated: z.number(),
+  coveragePct: z.number(),
+  outOfDate: z.number(),
+})
+export type MetricsCoverageRowDto = z.infer<typeof MetricsCoverageRowSchema>
+
+/** Cheap/strong routing savings per model (view: metrics_routing_savings). */
+export const MetricsSavingsRowSchema = z.object({
+  operation: z.string(),
+  providerId: z.string(),
+  model: z.string(),
+  calls: z.number(),
+  actualCostMicros: z.number(),
+  strongCostMicros: z.number(),
+  savedMicros: z.number(),
+})
+export type MetricsSavingsRowDto = z.infer<typeof MetricsSavingsRowSchema>
+
+/** The full Metrics-tab payload — one view per block. */
+export const MetricsOverviewSchema = z.object({
+  rates: MetricsRatesSchema,
+  modelUsage: z.array(MetricsModelUsageRowSchema),
+  costOverTime: z.array(MetricsCostDaySchema),
+  speed: z.array(MetricsSpeedRowSchema),
+  translationCoverage: z.array(MetricsCoverageRowSchema),
+  routingSavings: z.array(MetricsSavingsRowSchema),
+})
+export type MetricsOverviewDto = z.infer<typeof MetricsOverviewSchema>
