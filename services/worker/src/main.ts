@@ -5,6 +5,8 @@
  * (see @workspace/log). Env comes from the shell — packages never load
  * .env files (repo convention; values in .env.example).
  */
+import { runMigrations } from "@workspace/db/migrate"
+import { fileURLToPath } from "node:url"
 import { createDb } from "@workspace/db"
 import { initLogger, toLoggerConfig } from "@workspace/log"
 import { createLogConfig } from "@workspace/log/config"
@@ -124,7 +126,29 @@ const worker = createWorker({
     finalise: planFinaliseStage,
   },
 })
-worker.start()
+function start(): void {
+  worker.start()
+  console.log(`worker ${worker.workerId} started`)
+}
+
+// Apply pending migrations before the loops start (ADR-0004: the worker
+// owns the job machinery, and a fresh deploy boots against an empty DB).
+// Set WORKER_SKIP_MIGRATIONS=1 when an external migrator owns the schema.
+if (process.env.WORKER_SKIP_MIGRATIONS !== "1") {
+  runMigrations({
+    url: databaseUrl,
+    migrationsFolder: fileURLToPath(
+      new URL("../../../core/db/drizzle", import.meta.url)
+    ),
+  })
+    .then(start)
+    .catch((error) => {
+      console.error("worker migrations failed", error)
+      process.exit(1)
+    })
+} else {
+  start()
+}
 
 let stopping = false
 async function shutdown(signal: string): Promise<void> {

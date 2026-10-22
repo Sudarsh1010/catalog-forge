@@ -8,8 +8,11 @@ WORKDIR /app
 # Install workspace dependencies for the worker graph only.
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
 COPY services/worker/package.json services/worker/
+COPY core/cache/package.json core/cache/
 COPY core/db/package.json core/db/
 COPY shared/log/package.json shared/log/
+COPY shared/pipeline/package.json shared/pipeline/
+COPY shared/storage/package.json shared/storage/
 COPY tooling/typescript-config/package.json tooling/typescript-config/
 RUN pnpm install --frozen-lockfile --filter @workspace/worker
 
