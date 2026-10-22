@@ -13,6 +13,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.928.0",
     "@aws-sdk/lib-storage": "^3.928.0",
+    "@aws-sdk/s3-request-presigner": "^3.1154.0",
     "@hugeicons/core-free-icons": "^4.3.5",
     "@hugeicons/react": "^1.1.10",
     "@orpc/client": "^1.16.1",
