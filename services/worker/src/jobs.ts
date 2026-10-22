@@ -5,7 +5,7 @@
  * loops stay thin. Claims use `SELECT … FOR UPDATE SKIP LOCKED`, so multiple
  * workers never take the same Job.
  */
-import { sql } from "drizzle-orm"
+import { sql, type SQL } from "drizzle-orm"
 
 import type { Database } from "@workspace/db"
 import type { Job } from "@workspace/db/schema"
@@ -57,6 +57,28 @@ export async function claimJob(
   const leaseExpiresAt = new Date(
     config.now() + config.leaseTtlMs
   ).toISOString()
+  //
+  // Stage gate (EC-123): a Job is claimable only when its Stage is at or
+  // before the Import's current Stage. The barrier fan-out plans enrich and
+  // translate Batches while the Import still sits in `match-media`; without
+  // the gate, claim-order (created_at, id) would run them before media
+  // matching — and translate before enrich — finished. The fixed machine
+  // (ADR-0002) already advances the Import only when a Stage's last Job
+  // completes, so the gate serializes stages exactly, with deterministic
+  // Batch boundaries untouched. Non-pipeline stages (and Jobs whose Import
+  // row is gone) order as 0/99 and stay claimable.
+  const stageOrder = (column: "jobs" | "imports"): SQL =>
+    column === "jobs"
+      ? sql`CASE j.stage
+              WHEN 'intake' THEN 1 WHEN 'clean' THEN 2 WHEN 'group' THEN 3
+              WHEN 'match-media' THEN 4 WHEN 'enrich' THEN 5
+              WHEN 'translate' THEN 6 WHEN 'finalise' THEN 7
+              ELSE 0 END`
+      : sql`CASE i.stage
+              WHEN 'intake' THEN 1 WHEN 'clean' THEN 2 WHEN 'group' THEN 3
+              WHEN 'match-media' THEN 4 WHEN 'enrich' THEN 5
+              WHEN 'translate' THEN 6 WHEN 'finalise' THEN 7
+              ELSE 99 END`
   const rows = rowsOf<ClaimedRow>(
     await db.execute(sql`
       UPDATE jobs SET
@@ -67,10 +89,12 @@ export async function claimJob(
         last_error = NULL,
         updated_at = now()
       WHERE id = (
-        SELECT id FROM jobs
-        WHERE status = 'pending'
-        ORDER BY created_at, id
-        FOR UPDATE SKIP LOCKED
+        SELECT j.id FROM jobs j
+        LEFT JOIN imports i ON i.id = j.import_id
+        WHERE j.status = 'pending'
+          AND ${stageOrder("jobs")} <= ${stageOrder("imports")}
+        ORDER BY j.created_at, j.id
+        FOR UPDATE OF j SKIP LOCKED
         LIMIT 1
       )
       RETURNING id, store_id, import_id, stage, batch_key, attempts, max_attempts

@@ -29,6 +29,20 @@
       "when": 1792628278077,
       "tag": "0003_yellow_the_stranger",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792631678494,
+      "tag": "0004_purple_natasha_romanoff",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792633106692,
+      "tag": "0005_brown_daimon_hellstrom",
+      "breakpoints": true
     }
   ]
 }

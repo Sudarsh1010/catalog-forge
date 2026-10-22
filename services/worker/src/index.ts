@@ -66,3 +66,32 @@ export { parseCsvStream } from "./intake/csv"
 export type { SheetRowEvent } from "./intake/csv"
 export { parseXlsxFile } from "./intake/xlsx"
 export { extractPhotoArchive, assertSafeEntryName } from "./intake/zip"
+export {
+  createProviderRegistry,
+  createStubProvider,
+  routingTierFor,
+  syntheticCostMicros,
+  ProviderError,
+  STUB_PROVIDER_ID,
+  STUB_MODEL,
+  REVIEW_CONFIDENCE_THRESHOLD,
+} from "./provider"
+export type {
+  Provider,
+  ProviderEntry,
+  ProviderRegistry,
+  ProviderUsage,
+  ProviderFault,
+  EnrichInput,
+  EnrichmentResult,
+  TranslateInput,
+  TranslateResult,
+  RoutingTier,
+} from "./provider"
+export { createEnrichHandler, messinessScore } from "./enrich/handler"
+export type { EnrichDeps } from "./enrich/handler"
+export { createTranslateHandler } from "./translate/handler"
+export type { TranslateDeps } from "./translate/handler"
+export { createFinaliseHandler } from "./finalise/handler"
+export type { FinaliseDeps } from "./finalise/handler"
+export { FINALISE_BATCH_KEY, planFinaliseStage } from "./finalise/plan"
