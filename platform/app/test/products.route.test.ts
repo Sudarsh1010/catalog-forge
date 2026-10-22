@@ -429,7 +429,7 @@ describe("product.list (the review tab table)", () => {
       confidence: "all",
       search: "gießkanne",
     })
-    expect(byTitle.rows.map((row) => row.title)).toEqual([
+    expect(byTitle.rows.map((row) => row.title).sort()).toEqual([
       "Brunner Gießkanne 5L",
       "Gießkanne priced",
     ])

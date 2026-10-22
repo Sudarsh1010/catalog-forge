@@ -15,7 +15,7 @@ import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3"
 import { sql } from "drizzle-orm"
 import postgres from "postgres"
 
-export const TEST_DB_NAME = "catalog_forge_test"
+export const TEST_DB_NAME = process.env.CF_TEST_DB_NAME ?? "catalog_forge_test"
 export const TEST_REDIS_URL =
   process.env.REDIS_URL ?? "redis://127.0.0.1:6379/9"
 

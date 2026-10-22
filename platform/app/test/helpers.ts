@@ -19,7 +19,8 @@ import Yazl from "yazl"
 import { sql } from "drizzle-orm"
 import postgres from "postgres"
 
-export const TEST_DB_NAME = "catalog_forge_test_app"
+export const TEST_DB_NAME =
+  process.env.CF_TEST_DB_NAME ?? "catalog_forge_test_app"
 export const TEST_REDIS_URL =
   process.env.REDIS_URL ?? "redis://127.0.0.1:6379/10"
 
@@ -141,6 +142,9 @@ export async function startTestApp(): Promise<TestApp> {
       stdio: ["ignore", "pipe", "pipe"],
     }
   )
+  child.stdout?.on("data", (chunk: Buffer) => {
+    process.stdout.write(`[next dev] ${chunk}`)
+  })
   child.stderr?.on("data", (chunk: Buffer) => {
     process.stderr.write(`[next dev] ${chunk}`)
   })

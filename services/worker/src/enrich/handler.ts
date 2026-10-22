@@ -12,8 +12,7 @@
  * call, so it appends another row. Stage advancement does not happen here:
  * the Job machinery advances the Import when the last Batch completes.
  */
-import { eq, sql, type SQL } from "drizzle-orm"
-import type { PgColumn } from "drizzle-orm/pg-core"
+import { eq, sql } from "drizzle-orm"
 
 import type { Database } from "@workspace/db"
 import {
@@ -268,27 +267,6 @@ async function enrichProduct(
 }
 
 /**
- * SQL fragment evaluating to the stored Origin (GLOSSARY) of one enriched
- * field: `'manual'` when the merchant edited it, `'ai'` otherwise. `key` is
- * a raw SQL text expression (a literal or a computed key such as the field
- * prefix of a review reason).
- */
-function originOf(key: SQL): SQL {
-  return sql`COALESCE(${productEnrichments.fieldOrigins} ->> ${key}, 'ai')`
-}
-
-/** A literal field name as a bound SQL text parameter. */
-function fieldKey(name: string): SQL {
-  return sql`${name}`
-}
-
-/** Keep the stored value for manual fields; take the new AI value otherwise. */
-function keepManual(column: PgColumn, field: string): SQL {
-  return sql`CASE WHEN ${originOf(fieldKey(field))} = 'manual'
-              THEN ${column} ELSE EXCLUDED.${sql.raw(field)} END`
-}
-
-/**
  * Idempotent enrichment upsert (ADR-0003) with Origin precedence (GLOSSARY:
  * Origin — a manual field always wins over later AI output). On conflict the
  * merchant-edited fields — `field_origins` key = `manual` — keep their value,
@@ -298,7 +276,9 @@ function keepManual(column: PgColumn, field: string): SQL {
  * flagged fields the merchant already rewrote is no longer Needs Review.
  *
  * The whole merge happens inside the ON CONFLICT clause so a redelivered Job
- * converges atomically — no read-then-write window.
+ * converges atomically — no read-then-write window. Every SET fragment
+ * references its columns directly: drizzle's conflict builder drops columns
+ * that arrive inside nested sql templates.
  */
 async function upsertEnrichment(
   db: Database,
@@ -330,35 +310,58 @@ async function upsertEnrichment(
     .onConflictDoUpdate({
       target: productEnrichments.productId,
       set: {
-        title: keepManual(productEnrichments.title, "title"),
-        handle: keepManual(productEnrichments.handle, "handle"),
-        description: keepManual(productEnrichments.description, "description"),
-        category: keepManual(productEnrichments.category, "category"),
-        tags: keepManual(productEnrichments.tags, "tags"),
-        attributes: keepManual(productEnrichments.attributes, "attributes"),
+        title: sql`CASE WHEN COALESCE(${productEnrichments.fieldOrigins} ->> 'title', 'ai') = 'manual'
+                   THEN ${productEnrichments.title} ELSE EXCLUDED.title END`,
+        handle: sql`CASE WHEN COALESCE(${productEnrichments.fieldOrigins} ->> 'handle', 'ai') = 'manual'
+                    THEN ${productEnrichments.handle} ELSE EXCLUDED.handle END`,
+        description: sql`CASE WHEN COALESCE(${productEnrichments.fieldOrigins} ->> 'description', 'ai') = 'manual'
+                          THEN ${productEnrichments.description} ELSE EXCLUDED.description END`,
+        category: sql`CASE WHEN COALESCE(${productEnrichments.fieldOrigins} ->> 'category', 'ai') = 'manual'
+                      THEN ${productEnrichments.category} ELSE EXCLUDED.category END`,
+        tags: sql`CASE WHEN COALESCE(${productEnrichments.fieldOrigins} ->> 'tags', 'ai') = 'manual'
+                  THEN ${productEnrichments.tags} ELSE EXCLUDED.tags END`,
+        attributes: sql`CASE WHEN COALESCE(${productEnrichments.fieldOrigins} ->> 'attributes', 'ai') = 'manual'
+                        THEN ${productEnrichments.attributes} ELSE EXCLUDED.attributes END`,
+        // EXCLUDED's per-key confidences, overlaid with the stored values of
+        // manual fields (the merchant's score is part of what wins). Pure
+        // jsonb expressions: a FROM-subquery cannot correlate the target row
+        // inside DO UPDATE SET.
         confidence: sql`
-          (SELECT jsonb_object_agg(
-             e.k,
-             CASE WHEN ${originOf(sql`e.k`)} = 'manual' THEN e.v
-                  ELSE EXCLUDED.confidence -> e.k END
-           ORDER BY e.k)
-           FROM jsonb_each(EXCLUDED.confidence) AS e(k, v)`,
+          EXCLUDED.confidence
+            || jsonb_strip_nulls(jsonb_build_object('title',
+                 CASE WHEN COALESCE(${productEnrichments.fieldOrigins} ->> 'title', 'ai') = 'manual'
+                      THEN ${productEnrichments.confidence} -> 'title' END))
+            || jsonb_strip_nulls(jsonb_build_object('handle',
+                 CASE WHEN COALESCE(${productEnrichments.fieldOrigins} ->> 'handle', 'ai') = 'manual'
+                      THEN ${productEnrichments.confidence} -> 'handle' END))
+            || jsonb_strip_nulls(jsonb_build_object('description',
+                 CASE WHEN COALESCE(${productEnrichments.fieldOrigins} ->> 'description', 'ai') = 'manual'
+                      THEN ${productEnrichments.confidence} -> 'description' END))
+            || jsonb_strip_nulls(jsonb_build_object('category',
+                 CASE WHEN COALESCE(${productEnrichments.fieldOrigins} ->> 'category', 'ai') = 'manual'
+                      THEN ${productEnrichments.confidence} -> 'category' END))
+            || jsonb_strip_nulls(jsonb_build_object('tags',
+                 CASE WHEN COALESCE(${productEnrichments.fieldOrigins} ->> 'tags', 'ai') = 'manual'
+                      THEN ${productEnrichments.confidence} -> 'tags' END))
+            || jsonb_strip_nulls(jsonb_build_object('attributes',
+                 CASE WHEN COALESCE(${productEnrichments.fieldOrigins} ->> 'attributes', 'ai') = 'manual'
+                      THEN ${productEnrichments.confidence} -> 'attributes' END))`,
         // Manual origins survive; AI-produced origins reset (absent = 'ai').
         fieldOrigins: sql`
-          COALESCE((SELECT jsonb_object_agg(k, v)
-            FROM jsonb_each(${productEnrichments.fieldOrigins})
-            WHERE v #>> '{}' = 'manual'), '{}'::jsonb)`,
+          COALESCE((SELECT jsonb_object_agg(fo.key, fo.value)
+            FROM jsonb_each(${productEnrichments.fieldOrigins}) AS fo
+            WHERE fo.value #>> '{}' = 'manual'), '{}'::jsonb)`,
         status: sql`
           CASE WHEN EXISTS (
             SELECT 1 FROM jsonb_array_elements(EXCLUDED.review_reasons) AS r
-            WHERE ${originOf(sql`split_part(r #>> '{}', ':', 1)`)} <> 'manual'
+            WHERE COALESCE(${productEnrichments.fieldOrigins} ->> split_part(r #>> '{}', ':', 1), 'ai') <> 'manual'
           ) THEN 'needs_review'::enrichment_status
           ELSE 'ready'::enrichment_status END`,
         reviewReasons: sql`
           COALESCE((SELECT jsonb_agg(r ORDER BY ord)
             FROM jsonb_array_elements(EXCLUDED.review_reasons)
               WITH ORDINALITY AS t(r, ord)
-            WHERE ${originOf(sql`split_part(t.r #>> '{}', ':', 1)`)} <> 'manual'
+            WHERE COALESCE(${productEnrichments.fieldOrigins} ->> split_part(t.r #>> '{}', ':', 1), 'ai') <> 'manual'
           ), '[]'::jsonb)`,
         claims: sql`EXCLUDED.claims`,
         sourceRowIndexes: sql`EXCLUDED.source_row_indexes`,

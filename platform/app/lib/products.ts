@@ -124,7 +124,7 @@ export async function loadProductList(
 
   const dir = query.dir === "asc" ? sql`ASC` : sql`DESC`
   const sortKeys: Record<ProductListQuery["sort"], SQL> = {
-    title: sql`title ${dir}`,
+    title: sql`COALESCE(enriched_title, source_title) ${dir}`,
     status: sql`status ${dir}`,
     confidence: sql`min_confidence ${dir} NULLS LAST`,
     messiness: sql`messiness ${dir} NULLS LAST`,
