@@ -1,13 +1,17 @@
 /**
- * Dashboard retry route (Ticket 6 poison path) — plain HTTP against a real
- * `next dev`. The route writes one `job_retries` FACT per terminally-failed
- * Job (ADR-0004: the app never touches Job machinery) and rejects malformed
- * input without touching the database.
+ * Dashboard retry procedure (Ticket 6 poison path) — via the typed oRPC
+ * client against a real `next dev` (RPC mount at /api/rpc). It writes one
+ * `job_retries` FACT per terminally-failed Job (ADR-0004: the app never
+ * touches Job machinery) and rejects malformed input without touching the
+ * database.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { sql } from "drizzle-orm"
 
 import type { Db } from "@workspace/db"
+import { createORPCClient, isDefinedError, ORPCError, safe } from "@orpc/client"
+import { RPCLink } from "@orpc/client/fetch"
+import type { ClientContract } from "@workspace/contracts"
 
 import {
   connectTestDb,
@@ -20,11 +24,13 @@ import {
 
 let app: TestApp
 let db: Db
+let client: ClientContract
 
 beforeAll(async () => {
   await createTestDatabase()
   db = connectTestDb()
   app = await startTestApp()
+  client = createORPCClient(new RPCLink({ url: `${app.baseUrl}/api/rpc` }))
 })
 
 beforeEach(async () => {
@@ -60,21 +66,13 @@ async function seedFailedJob(
   return id
 }
 
-describe("POST /api/imports/[id]/retries (retry fact)", () => {
-  it("records retry facts for every failed job and reports 202", async () => {
+describe("import.retry (retry fact)", () => {
+  it("records retry facts for every failed job", async () => {
     const importId = await seedImportRow()
     const jobA = await seedFailedJob(importId, "products-000001-000100")
     const jobB = await seedFailedJob(importId, "products-000101-000200")
 
-    const response = await fetch(
-      `${app.baseUrl}/api/imports/${importId}/retries`,
-      { method: "POST" }
-    )
-    expect(response.status).toBe(202)
-    const payload = (await response.json()) as {
-      requested: number
-      jobIds: string[]
-    }
+    const payload = await client.import.retry({ id: importId })
     expect(payload.requested).toBe(2)
     expect([...payload.jobIds].sort()).toEqual([jobA, jobB].sort())
 
@@ -95,16 +93,7 @@ describe("POST /api/imports/[id]/retries (retry fact)", () => {
     await seedFailedJob(importId, "products-000001-000100")
     const jobB = await seedFailedJob(importId, "products-000101-000200")
 
-    const response = await fetch(
-      `${app.baseUrl}/api/imports/${importId}/retries`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ jobIds: [jobB] }),
-      }
-    )
-    expect(response.status).toBe(202)
-    const payload = (await response.json()) as { requested: number }
+    const payload = await client.import.retry({ id: importId, jobIds: [jobB] })
     expect(payload.requested).toBe(1)
   })
 
@@ -113,11 +102,7 @@ describe("POST /api/imports/[id]/retries (retry fact)", () => {
     await seedFailedJob(importId, "products-000001-000100")
 
     for (let i = 0; i < 2; i++) {
-      const response = await fetch(
-        `${app.baseUrl}/api/imports/${importId}/retries`,
-        { method: "POST" }
-      )
-      expect(response.status).toBe(202)
+      await client.import.retry({ id: importId })
     }
     const facts = (await db.db.execute(sql`
       SELECT count(*)::int AS count FROM job_retries WHERE import_id = ${importId}
@@ -125,20 +110,18 @@ describe("POST /api/imports/[id]/retries (retry fact)", () => {
     expect(facts[0]!.count).toBe(1)
   })
 
-  it("rejects non-uuid jobIds with 400 and records nothing", async () => {
+  it("rejects non-uuid jobIds as a validation error and records nothing", async () => {
     const importId = await seedImportRow()
 
-    const response = await fetch(
-      `${app.baseUrl}/api/imports/${importId}/retries`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ jobIds: "nope" }),
-      }
+    const [error] = await safe(
+      client.import.retry({
+        id: importId,
+        jobIds: "nope" as unknown as string[],
+      })
     )
-    expect(response.status).toBe(400)
-    const payload = (await response.json()) as { error: { code: string } }
-    expect(payload.error.code).toBe("invalid_job_ids")
+    expect(isDefinedError(error)).toBe(false)
+    expect(error).toBeInstanceOf(ORPCError)
+    expect((error as ORPCError<string, unknown>).code).toBe("BAD_REQUEST")
 
     const facts = (await db.db.execute(sql`
       SELECT count(*)::int AS count FROM job_retries WHERE import_id = ${importId}
@@ -146,18 +129,24 @@ describe("POST /api/imports/[id]/retries (retry fact)", () => {
     expect(facts[0]!.count).toBe(0)
   })
 
-  it("returns 404 for unknown and malformed import ids", async () => {
-    const missing = await fetch(
-      `${app.baseUrl}/api/imports/${crypto.randomUUID()}/retries`,
-      { method: "POST" }
+  it("throws IMPORT_NOT_FOUND for unknown and malformed import ids", async () => {
+    const [missingError] = await safe(
+      client.import.retry({ id: crypto.randomUUID() })
     )
-    expect(missing.status).toBe(404)
+    expect(isDefinedError(missingError)).toBe(true)
+    if (isDefinedError(missingError)) {
+      expect(missingError.code).toBe("IMPORT_NOT_FOUND")
+      expect(missingError.message).toBe("Import not found.")
+    }
 
     // A non-UUID id must not become a Postgres cast error (500).
-    const malformed = await fetch(
-      `${app.baseUrl}/api/imports/not-a-uuid/retries`,
-      { method: "POST" }
+    const [malformedError] = await safe(
+      client.import.retry({ id: "not-a-uuid" })
     )
-    expect(malformed.status).toBe(404)
+    expect(isDefinedError(malformedError)).toBe(false)
+    expect(malformedError).toBeInstanceOf(ORPCError)
+    expect((malformedError as ORPCError<string, unknown>).code).toBe(
+      "BAD_REQUEST"
+    )
   })
 })

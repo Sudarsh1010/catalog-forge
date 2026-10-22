@@ -1,14 +1,17 @@
 /**
  * Upload route — the web seam: plain HTTP requests against a real `next dev`
  * server. Broken-fixture tests run worker `intake` in-process afterwards and
- * assert the merchant-fixable failure reason over plain HTTP (GET), covering
- * the EC-006/EC-008 classes end to end.
+ * assert the merchant-fixable failure reason via the oRPC detail procedure,
+ * covering the EC-006/EC-008 classes end to end.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { request as httpRequest } from "node:http"
 import { eq, sql } from "drizzle-orm"
 
 import type { Db } from "@workspace/db"
+import { createORPCClient } from "@orpc/client"
+import { RPCLink } from "@orpc/client/fetch"
+import type { ClientContract } from "@workspace/contracts"
 import type { Cache } from "@workspace/cache"
 import type { Storage } from "@workspace/storage"
 import { importFiles, sheetRows } from "@workspace/db/schema"
@@ -33,6 +36,7 @@ import {
 } from "./helpers"
 
 let app: TestApp
+let client: ClientContract
 let db: Db
 let storage: Storage
 let cache: Cache
@@ -44,6 +48,7 @@ beforeAll(async () => {
   cache = testCache()
   await flushTestRedis()
   app = await startTestApp()
+  client = createORPCClient(new RPCLink({ url: `${app.baseUrl}/api/rpc` }))
 })
 
 beforeEach(async () => {
@@ -74,10 +79,8 @@ interface ImportPayload {
 }
 
 async function fetchImport(id: string): Promise<ImportPayload["import"]> {
-  const response = await fetch(`${app.baseUrl}/api/imports/${id}`)
-  expect(response.ok).toBe(true)
-  const payload = (await response.json()) as { import: ImportPayload["import"] }
-  return payload.import
+  const { import: imported } = await client.import.detail({ id })
+  return imported
 }
 
 /** Run the real worker loops in-process until the import reaches a terminal state. */

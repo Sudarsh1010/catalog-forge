@@ -12,7 +12,7 @@
 import { Readable } from "node:stream"
 
 import { DeleteObjectCommand } from "@aws-sdk/client-s3"
-import { and, desc, eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import busboy from "busboy"
 
 import type { Database } from "@workspace/db"
@@ -323,15 +323,4 @@ async function findExistingImport(
     )
     .limit(1)
   return rows[0] ?? null
-}
-
-/** The import queue, newest first (the dashboard's initial hydration). */
-export async function GET(): Promise<Response> {
-  const db = getDb().db
-  const rows = await db
-    .select()
-    .from(imports)
-    .orderBy(desc(imports.createdAt))
-    .limit(100)
-  return Response.json({ imports: rows.map(toImportDto) })
 }

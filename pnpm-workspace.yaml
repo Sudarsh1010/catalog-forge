@@ -15,3 +15,15 @@ allowBuilds:
 
 minimumReleaseAgeExclude:
   - vite@8.3.5
+  - "@orpc/client@1.16.1"
+  - "@orpc/contract@1.16.1"
+  - "@orpc/interop@1.16.1"
+  - "@orpc/server@1.16.1"
+  - "@orpc/shared@1.16.1"
+  - "@orpc/standard-server-aws-lambda@1.16.1"
+  - "@orpc/standard-server-fastify@1.16.1"
+  - "@orpc/standard-server-fetch@1.16.1"
+  - "@orpc/standard-server-node@1.16.1"
+  - "@orpc/standard-server-peer@1.16.1"
+  - "@orpc/standard-server@1.16.1"
+  - "@orpc/tanstack-query@1.16.1"

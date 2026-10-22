@@ -15,7 +15,12 @@
     "@aws-sdk/lib-storage": "^3.928.0",
     "@hugeicons/core-free-icons": "^4.3.5",
     "@hugeicons/react": "^1.1.10",
+    "@orpc/client": "^1.16.1",
+    "@orpc/server": "^1.16.1",
+    "@orpc/tanstack-query": "^1.16.1",
+    "@tanstack/react-query": "^5.104.5",
     "@workspace/cache": "workspace:*",
+    "@workspace/contracts": "workspace:*",
     "@workspace/db": "workspace:*",
     "@workspace/log": "workspace:*",
     "@workspace/pipeline": "workspace:*",
@@ -31,7 +36,6 @@
     "react-dom": "19.3.0"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
     "@types/busboy": "^1.5.4",
     "@types/node": "^20",
     "@types/react": "^19",

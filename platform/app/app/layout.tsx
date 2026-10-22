@@ -2,7 +2,7 @@ import { Geist, Geist_Mono, Lora } from "next/font/google"
 
 import "@workspace/ui/globals.css"
 import { EvlogProvider } from "evlog/next/client"
-import { ThemeProvider } from "@/components/theme-provider"
+import { Providers } from "@/components/providers"
 import { cn } from "@workspace/ui/lib/utils"
 
 const loraHeading = Lora({ subsets: ["latin"], variable: "--font-heading" })
@@ -33,7 +33,7 @@ export default function RootLayout({
     >
       <body>
         <EvlogProvider service="web" transport={{ enabled: false }}>
-          <ThemeProvider>{children}</ThemeProvider>
+          <Providers>{children}</Providers>
         </EvlogProvider>
       </body>
     </html>

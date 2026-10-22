@@ -1,26 +1,26 @@
 /**
- * Import read models shared by the JSON routes and the SSE snapshot. The
+ * Import read models shared by the oRPC procedures and the SSE snapshot. The
  * dashboard state is read-only across the app↔worker contract (ADR-0004):
- * these shapes are what the browser sees.
+ * these shapes are what the browser sees. The DTOs are the single source of
+ * truth in @workspace/contracts.
  */
+import type {
+  ImportDetailDto,
+  ImportDto,
+  ReconciliationDto,
+  StageJobCounts,
+} from "@workspace/contracts"
 import type { Import } from "@workspace/db/schema"
 
-export interface ImportDto {
-  id: string
-  storeId: string
-  status: string
-  stage: string
-  originalFilename: string
-  sheetFormat: string
-  rowCount: number | null
-  failureReason: string | null
-  /** Pause surface (GLOSSARY: Pause): "Paused — resuming in X minutes". */
-  pausedProviderId: string | null
-  pausedUntil: string | null
-  contentHash: string
-  createdAt: string
-  updatedAt: string
-}
+export type {
+  ImportDto,
+  StageJobCounts,
+  ReconciliationDto,
+  RowErrorDto,
+  ParkedPhotoDto,
+  ProductRowDto,
+  ImportDetailDto,
+} from "@workspace/contracts"
 
 export function toImportDto(row: Import): ImportDto {
   return {
@@ -62,72 +62,10 @@ import { imports } from "@workspace/db/schema"
 export const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-/** Live per-stage Job counts (GLOSSARY: Job — the Work Queue's states). */
-export interface StageJobCounts {
-  pending: number
-  running: number
-  completed: number
-  failed: number
-}
-
-/**
- * Row Ledger accounting (GLOSSARY: Row Ledger — the only source of "the
- * counts add up"): every state count plus the unaccounted remainder, so
- * done + needsReview + failed + inProgress always equals the sheet total.
- */
-export interface ReconciliationDto {
-  /** Data rows of the sheet; `null` until intake lands them. */
-  sheetRows: number | null
-  done: number
-  needsReview: number
-  failed: number
-  /** sheetRows minus the ledger's rows; 0 once everything is terminal. */
-  inProgress: number | null
-}
-
-/** One failed Sheet Row: its reason and the Jobs that can retry it. */
-export interface RowErrorDto {
-  rowIndex: number
-  reason: string
-  ec: string | null
-  /**
-   * Terminally-failed enrich/translate Jobs whose Batch covers this row's
-   * Product — the retry action requeues exactly these.
-   */
-  jobIds: string[]
-}
-
-/** An uploaded photo that matched no Product, with its reason. */
-export interface ParkedPhotoDto {
-  filename: string
-  reason: string
-  ec: string | null
-}
-
-/** One Product with its enrichment state — the re-run selection surface. */
-export interface ProductRowDto {
-  id: string
-  title: string
-  naturalKey: string
-  needsReview: boolean
-  reviewReason: string | null
-  enrichmentStatus: "ready" | "needs_review" | null
-  enrichedAt: string | null
-}
-
 /** Caps so a 10k-row Import cannot sink the page; totals travel beside. */
 const ERROR_PAGE_SIZE = 100
 const PARKED_PAGE_SIZE = 100
 const PRODUCT_PAGE_SIZE = 200
-
-export interface ImportDetailDto extends ImportDto {
-  /** Per-stage Job counts for all seven Stages (zero-initialized). */
-  stages: Record<Stage, StageJobCounts>
-  reconciliation: ReconciliationDto
-  errors: { rows: RowErrorDto[]; total: number }
-  parkedPhotos: { rows: ParkedPhotoDto[]; total: number }
-  products: { rows: ProductRowDto[]; total: number }
-}
 
 function emptyStageCounts(): Record<Stage, StageJobCounts> {
   return Object.fromEntries(

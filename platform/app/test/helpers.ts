@@ -152,8 +152,9 @@ export async function startTestApp(): Promise<TestApp> {
       throw new Error(`next dev exited early with code ${child.exitCode}`)
     }
     try {
-      const response = await fetch(`${baseUrl}/api/imports`)
-      if (response.ok || response.status === 500) break
+      // Any HTTP response from the oRPC mount means the dev server serves.
+      await fetch(`${baseUrl}/api/rpc`)
+      break
     } catch {
       // not up yet
     }

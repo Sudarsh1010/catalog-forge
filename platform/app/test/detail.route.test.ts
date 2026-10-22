@@ -1,10 +1,11 @@
 /**
- * Import detail + re-run routes — plain HTTP against a real `next dev`.
+ * Import detail + re-run procedures — via the typed oRPC client against a
+ * real `next dev` (RPC mount at /api/rpc).
  *
  * The detail snapshot must carry per-stage Job counts, a Row Ledger
  * reconciliation that adds up to the sheet total, per-row errors with the
  * Jobs that can retry them, Parked Photos with reasons, and the Products.
- * The reruns route must record the Re-run FACT exactly as the Worker's
+ * The rerun procedure must record the Re-run FACT exactly as the Worker's
  * sweeper expects it (ADR-0004) and reject malformed or cross-Import
  * selections.
  */
@@ -13,8 +14,11 @@ import { createHash } from "node:crypto"
 import { sql } from "drizzle-orm"
 
 import type { Db } from "@workspace/db"
+import { createORPCClient, isDefinedError, ORPCError, safe } from "@orpc/client"
+import { RPCLink } from "@orpc/client/fetch"
+import type { ClientContract } from "@workspace/contracts"
 
-import type { ImportDetailDto, StageJobCounts } from "@/lib/imports"
+import type { StageJobCounts } from "@/lib/imports"
 
 import {
   connectTestDb,
@@ -27,11 +31,13 @@ import {
 
 let app: TestApp
 let db: Db
+let client: ClientContract
 
 beforeAll(async () => {
   await createTestDatabase()
   db = connectTestDb()
   app = await startTestApp()
+  client = createORPCClient(new RPCLink({ url: `${app.baseUrl}/api/rpc` }))
 })
 
 beforeEach(async () => {
@@ -288,15 +294,11 @@ async function seedDetailScenario(): Promise<{
   return { importId, failedEnrichJobId }
 }
 
-describe("GET /api/imports/[id] (detail snapshot)", () => {
+describe("import.detail (detail snapshot)", () => {
   it("returns per-stage job counts, reconciliation, errors, parked photos and products", async () => {
     const { importId, failedEnrichJobId } = await seedDetailScenario()
 
-    const response = await fetch(`${app.baseUrl}/api/imports/${importId}`)
-    expect(response.status).toBe(200)
-    const { import: detail } = (await response.json()) as {
-      import: ImportDetailDto
-    }
+    const { import: detail } = await client.import.detail({ id: importId })
 
     expect(detail.id).toBe(importId)
     expect(detail.rowCount).toBe(10)
@@ -413,48 +415,46 @@ describe("GET /api/imports/[id] (detail snapshot)", () => {
       pausedProviderId: "stub",
     })
 
-    const response = await fetch(`${app.baseUrl}/api/imports/${importId}`)
-    expect(response.status).toBe(200)
-    const { import: detail } = (await response.json()) as {
-      import: ImportDetailDto
-    }
+    const { import: detail } = await client.import.detail({ id: importId })
     expect(detail.status).toBe("paused")
     expect(detail.pausedProviderId).toBe("stub")
     expect(detail.pausedUntil).toBe(until.toISOString())
   })
 
-  it("returns 404 for unknown and malformed ids", async () => {
-    const missing = await fetch(
-      `${app.baseUrl}/api/imports/${crypto.randomUUID()}`
+  it("throws IMPORT_NOT_FOUND for unknown and malformed ids", async () => {
+    const [missingError] = await safe(
+      client.import.detail({ id: crypto.randomUUID() })
     )
-    expect(missing.status).toBe(404)
-    const malformed = await fetch(`${app.baseUrl}/api/imports/not-a-uuid`)
-    expect(malformed.status).toBe(404)
+    expect(isDefinedError(missingError)).toBe(true)
+    if (isDefinedError(missingError)) {
+      expect(missingError.code).toBe("IMPORT_NOT_FOUND")
+      expect(missingError.message).toBe("Import not found.")
+    }
+
+    // A non-UUID id is rejected by the contract's input validation.
+    const [malformedError] = await safe(
+      client.import.detail({ id: "not-a-uuid" })
+    )
+    expect(isDefinedError(malformedError)).toBe(false)
+    expect(malformedError).toBeInstanceOf(ORPCError)
+    if (malformedError instanceof ORPCError) {
+      expect(malformedError.code).toBe("BAD_REQUEST")
+    }
   })
 })
 
-describe("POST /api/imports/[id]/reruns (Re-run fact)", () => {
-  it("records the fact with the chosen products and reports 202", async () => {
+describe("import.rerun (Re-run fact)", () => {
+  it("records the fact with the chosen products", async () => {
     const importId = await seedImportRow({ rowCount: 4 })
     const ordered: string[] = []
     for (const key of ["sku:r-1", "sku:r-2", "sku:r-3"]) {
       ordered.push(await seedProduct(importId, key))
     }
 
-    const response = await fetch(
-      `${app.baseUrl}/api/imports/${importId}/reruns`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ productIds: [ordered[0], ordered[2]] }),
-      }
-    )
-    expect(response.status).toBe(202)
-    const payload = (await response.json()) as {
-      requested: number
-      stage: string
-      productIds: string[]
-    }
+    const payload = await client.import.rerun({
+      id: importId,
+      productIds: [ordered[0]!, ordered[2]!],
+    })
     expect(payload.requested).toBe(2)
     expect(payload.stage).toBe("enrich")
     expect(payload.productIds).toEqual([ordered[0], ordered[2]])
@@ -484,15 +484,10 @@ describe("POST /api/imports/[id]/reruns (Re-run fact)", () => {
     const product = await seedProduct(importId, "sku:d-1")
 
     for (let i = 0; i < 2; i++) {
-      const response = await fetch(
-        `${app.baseUrl}/api/imports/${importId}/reruns`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ productIds: [product] }),
-        }
-      )
-      expect(response.status).toBe(202)
+      await client.import.rerun({
+        id: importId,
+        productIds: [product],
+      })
     }
     const facts = (await db.db.execute(sql`
       SELECT count(*)::int AS count FROM reruns WHERE import_id = ${importId}
@@ -500,33 +495,24 @@ describe("POST /api/imports/[id]/reruns (Re-run fact)", () => {
     expect(facts[0]!.count).toBe(2)
   })
 
-  it("rejects missing, empty and non-uuid selections with 400", async () => {
+  it("rejects missing, empty and non-uuid selections as input validation errors", async () => {
     const importId = await seedImportRow({ rowCount: 1 })
 
-    const noBody = await fetch(
-      `${app.baseUrl}/api/imports/${importId}/reruns`,
-      {
-        method: "POST",
-      }
+    // A malformed body is impossible over the typed client, but an invalid
+    // payload (empty or non-uuid selection) still surfaces as an oRPC
+    // validation error, not a record.
+    const [emptyError] = await safe(
+      client.import.rerun({ id: importId, productIds: [] })
     )
-    expect(noBody.status).toBe(400)
+    expect(isDefinedError(emptyError)).toBe(false)
+    expect(emptyError).toBeInstanceOf(ORPCError)
+    expect((emptyError as ORPCError<string, unknown>).code).toBe("BAD_REQUEST")
 
-    const empty = await fetch(`${app.baseUrl}/api/imports/${importId}/reruns`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ productIds: [] }),
-    })
-    expect(empty.status).toBe(400)
-
-    const badUuid = await fetch(
-      `${app.baseUrl}/api/imports/${importId}/reruns`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ productIds: ["nope"] }),
-      }
+    const [badUuidError] = await safe(
+      client.import.rerun({ id: importId, productIds: ["nope"] })
     )
-    expect(badUuid.status).toBe(400)
+    expect(isDefinedError(badUuidError)).toBe(false)
+    expect(badUuidError).toBeInstanceOf(ORPCError)
 
     const facts = (await db.db.execute(sql`
       SELECT count(*)::int AS count FROM reruns WHERE import_id = ${importId}
@@ -534,33 +520,29 @@ describe("POST /api/imports/[id]/reruns (Re-run fact)", () => {
     expect(facts[0]!.count).toBe(0)
   })
 
-  it("rejects products from another import with 422", async () => {
+  it("rejects products from another import with UNKNOWN_PRODUCTS", async () => {
     const importId = await seedImportRow({ rowCount: 1 })
     const otherImport = await seedImportRow({ rowCount: 1 })
     const foreignProduct = await seedProduct(otherImport, "sku:f-1")
 
-    const response = await fetch(
-      `${app.baseUrl}/api/imports/${importId}/reruns`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ productIds: [foreignProduct] }),
-      }
+    const [error] = await safe(
+      client.import.rerun({ id: importId, productIds: [foreignProduct] })
     )
-    expect(response.status).toBe(422)
-    const payload = (await response.json()) as { error: { code: string } }
-    expect(payload.error.code).toBe("unknown_products")
+    expect(error).toBeInstanceOf(ORPCError)
+    expect((error as ORPCError<string, unknown>).code).toBe("UNKNOWN_PRODUCTS")
+    expect((error as ORPCError<string, unknown>).status).toBe(422)
   })
 
-  it("returns 404 for an unknown import", async () => {
-    const response = await fetch(
-      `${app.baseUrl}/api/imports/${crypto.randomUUID()}/reruns`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ productIds: [crypto.randomUUID()] }),
-      }
+  it("throws IMPORT_NOT_FOUND for an unknown import", async () => {
+    const [error] = await safe(
+      client.import.rerun({
+        id: crypto.randomUUID(),
+        productIds: [crypto.randomUUID()],
+      })
     )
-    expect(response.status).toBe(404)
+    expect(isDefinedError(error)).toBe(true)
+    if (isDefinedError(error)) {
+      expect(error.code).toBe("IMPORT_NOT_FOUND")
+    }
   })
 })

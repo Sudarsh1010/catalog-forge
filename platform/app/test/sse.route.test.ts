@@ -8,6 +8,9 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest"
 
 import type { Db } from "@workspace/db"
+import { createORPCClient } from "@orpc/client"
+import { RPCLink } from "@orpc/client/fetch"
+import type { ClientContract } from "@workspace/contracts"
 import type { Cache } from "@workspace/cache"
 import type { Storage } from "@workspace/storage"
 import { createIntakeHandler, createWorker } from "@workspace/worker"
@@ -29,6 +32,7 @@ import {
 } from "./helpers"
 
 let app: TestApp
+let client: ClientContract
 let db: Db
 let storage: Storage
 let cache: Cache
@@ -40,6 +44,7 @@ beforeAll(async () => {
   cache = testCache()
   await flushTestRedis()
   app = await startTestApp()
+  client = createORPCClient(new RPCLink({ url: `${app.baseUrl}/api/rpc` }))
 })
 
 beforeEach(async () => {
@@ -133,9 +138,8 @@ async function uploadAndIntake(): Promise<string> {
   worker.start()
   try {
     await waitFor("import advanced to clean", async () => {
-      const detail = await fetch(`${app.baseUrl}/api/imports/${importId}`)
-      const body = (await detail.json()) as { import: { stage: string } }
-      return body.import.stage === "clean"
+      const { import: imported } = await client.import.detail({ id: importId })
+      return imported.stage === "clean"
     })
   } finally {
     await worker.stop()

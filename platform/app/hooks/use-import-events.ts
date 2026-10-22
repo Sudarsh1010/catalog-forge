@@ -5,14 +5,22 @@
  * EventSource reconnects automatically and resends Last-Event-ID, so a
  * dropped connection resumes without gaps; the snapshot re-syncs state.
  *
+ * Server state lives only in the query cache (ADR-0004): snapshots replace
+ * the Import detail cache entry, envelope events merge patches over it, and
+ * event bursts coalesce into one debounced cache invalidation so the read
+ * model re-syncs from the DB of record.
+ *
  * Stream events arrive as the worker's published envelope
  * `{ type, at, data }` — the payload fields live under `data`.
  */
 import { useEffect, useRef } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 
 import { IMPORT_EVENT_TYPES } from "@workspace/pipeline"
 
-import type { ImportDto } from "@/lib/imports"
+import type { ImportDetailDto, ImportDto } from "@workspace/contracts"
+
+import { orpc } from "@/lib/orpc"
 
 interface ImportEventEnvelope {
   type?: string
@@ -28,25 +36,28 @@ interface ImportEventEnvelope {
   }
 }
 
-type Listener = (patch: Partial<ImportDto>) => void
-
 /**
- * Subscribe to one import's event stream. The listener receives patches
- * derived from SSE events; the initial snapshot patches the full state
- * (the detail read model, whose extra fields flow through to the caller).
+ * Subscribe to one import's event stream, writing patches straight into
+ * the shared Import detail cache entry (dashboard rows and the detail page
+ * observe the same data).
  */
-export function useImportEvents(
-  importId: string | undefined,
-  listener: Listener
-): void {
-  const listenerRef = useRef<Listener>(listener)
-
-  useEffect(() => {
-    listenerRef.current = listener
-  })
+export function useImportEvents(importId: string | undefined): void {
+  const queryClient = useQueryClient()
 
   useEffect(() => {
     if (!importId) return
+    const detailKey = orpc.import.detail.queryKey({ input: { id: importId } })
+
+    // Coalesce event bursts (a stage completing fires one event per Job):
+    // one debounced invalidation re-syncs from the DB of record.
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined
+    const scheduleRefresh = (): void => {
+      clearTimeout(refreshTimer)
+      refreshTimer = setTimeout(() => {
+        void queryClient.invalidateQueries({ queryKey: detailKey })
+      }, 400)
+    }
+
     const source = new EventSource(`/api/imports/${importId}/events`)
 
     const applyEnvelope = (raw: string): void => {
@@ -70,15 +81,18 @@ export function useImportEvents(
         patch.pausedProviderId = payload.providerId ?? null
         patch.pausedUntil = payload.resumeAt
       }
-      listenerRef.current(patch)
+      queryClient.setQueryData(detailKey, (previous) =>
+        previous ? { import: { ...previous.import, ...patch } } : previous
+      )
+      scheduleRefresh()
     }
 
     source.addEventListener("snapshot", (event) => {
       try {
         const dto = JSON.parse(
           (event as MessageEvent<string>).data
-        ) as ImportDto
-        listenerRef.current(dto)
+        ) as ImportDetailDto
+        queryClient.setQueryData(detailKey, { import: dto })
       } catch {
         // ignore malformed snapshot
       }
@@ -89,7 +103,8 @@ export function useImportEvents(
       )
     }
     return () => {
+      clearTimeout(refreshTimer)
       source.close()
     }
-  }, [importId])
+  }, [importId, queryClient])
 }

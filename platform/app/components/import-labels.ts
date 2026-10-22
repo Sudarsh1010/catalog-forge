@@ -1,6 +1,8 @@
 /**
  * Shared dashboard vocabulary: the Stage display names and the Import
- * status chip styles, so the queue and the detail page never drift.
+ * status Badge palettes, so the queue and the detail page never drift.
+ * The amber/blue/emerald coding is product-specific, applied via
+ * className on the kit Badge — not a kit token.
  */
 import type { Stage } from "@workspace/pipeline"
 
