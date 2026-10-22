@@ -12,7 +12,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "sheet:generate": "tsx scripts/generate-sheet.ts",
-    "resilience:e2e": "tsx scripts/resilience-e2e.ts"
+    "resilience:e2e": "tsx scripts/resilience-e2e.ts",
+    "eval:l1": "tsx scripts/eval-score.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.99",
