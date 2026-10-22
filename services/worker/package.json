@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "sheet:generate": "tsx scripts/generate-sheet.ts",
     "resilience:e2e": "tsx scripts/resilience-e2e.ts",
-    "eval:l1": "tsx scripts/eval-score.ts"
+    "eval:l1": "tsx scripts/eval-score.ts",
+    "eval:l2": "tsx scripts/eval-score-l2.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.99",

@@ -62,3 +62,49 @@ no API key; throwaway `catalog_forge_eval` database).
 against live Postgres/Redis/Garage services. `eval/thresholds.json` records
 this baseline as floors: any Layer 1 field dropping below it fails the run.
 Fix the pipeline, raise the floor.
+
+## Layer 2 — AI-field accuracy (Ticket #20, real provider)
+
+`pnpm --filter @workspace/worker eval:l2` re-runs the SAME Eval Set pipeline
+through the real OpenAI provider (two-tier gpt-4o-mini/gpt-4o via
+`OPENAI_API_KEY`, the production registry — Demo Mode's stub is never
+involved) and grades the AI-enriched fields over a deterministic sample of
+12 gold Products (`EVAL_L2_SAMPLE` to change; every Product carrying gold
+Claims is included first, since Claims stress the grounding rule):
+
+| Field | Grading rule (loose — valid output varies) |
+|---|---|
+| Title | semantic-ish: normalized token F1 ≥ 0.6 against the gold title (umlaut folding, stopwords/units dropped) |
+| Category | fuzzy vs the sheet's own `Kategorie` majority for the Product's source rows: normalized containment or Jaccard ≥ 0.5 |
+| Tags | grounding: every tag must trace to the Product's source Sheet Rows (token coverage ≥ 0.6); an invented tag is an error |
+| Claims | EC-075 traceability: every predicted Claim must cite a `sourceRowIndex` inside the Product's sourceRows AND its text must be grounded in that row's cells — a traceability failure is an ERROR, never partially credited. Gold Claims must also be covered. |
+
+The same run's Layer 1 fields are printed alongside (the registry swap does
+not change grouping/price/units — they are provider-independent — but the
+printout proves it per run).
+
+### Measured score
+
+**PENDING KEY.** No `OPENAI_API_KEY` was available in the recording
+environment (`.env.example` ships the variable commented out), so the script
+is wired, key-gated, and verified end-to-end — but no live gpt-4o-mini/gpt-4o
+numbers exist yet. Verification without a key:
+
+- `eval-score-l2.ts` refuses to run keyless (exit 1 with a pointed message) —
+  Layer 2 numbers without a real provider would be Demo Mode numbers wearing
+  a Layer 2 label.
+- Unit suite (`test/eval-l2.test.ts`) pins every grading rule: loose title
+  F1, fuzzy category, tag grounding, gold-claim coverage, and — the
+  acceptance rule — claim traceability failures (row outside `sourceRows`,
+  text not grounded in the cited row) scored as errors.
+- Integration suite (`test/eval-l2.integration.test.ts`) runs the REAL
+  pipeline up through enrich with an injected fake provider (the same seam
+  `test/openai.integration.test.ts` uses) and grades what landed in
+  `product_enrichments`: grounded output scores all four fields true; a
+  hallucinated claim citing row 99 and an invented tag `Bambus` score as
+  errors with `not in sourceRows` named.
+
+To record the live number: `OPENAI_API_KEY=sk-… pnpm --filter @workspace/worker eval:l2`
+and replace this section with the per-field table. Raise floors in
+`eval/thresholds.json` only for Layer 1; Layer 2 thresholds wait for a first
+keyed baseline.
