@@ -14,6 +14,7 @@ import { imports } from "@workspace/db/schema"
 
 import { getDb } from "@/lib/db"
 import { loadImportDetail, toImportDto, UUID_RE } from "@/lib/imports"
+import { loadMetricsOverview } from "@/lib/metrics"
 
 const os = implement(contract)
 
@@ -161,6 +162,12 @@ const appRouter = os.router({
         stage: "enrich" as const,
       }
     }),
+  },
+  metrics: {
+    /** Metrics tab (ticket #19): one SELECT per Postgres view, no writes. */
+    overview: os.metrics.overview.handler(async () =>
+      loadMetricsOverview(getDb().db)
+    ),
   },
 })
 

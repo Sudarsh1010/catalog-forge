@@ -9,7 +9,12 @@ import { oc } from "@orpc/contract"
 import type { ContractRouterClient } from "@orpc/contract"
 import { z } from "zod"
 
-import { ImportDetailSchema, ImportDtoSchema, ImportIdSchema } from "./dto"
+import {
+  ImportDetailSchema,
+  ImportDtoSchema,
+  ImportIdSchema,
+  MetricsOverviewSchema,
+} from "./dto"
 
 /** Defined payload-free error for a missing or malformed Import id. */
 const IMPORT_NOT_FOUND_ERRORS = {
@@ -73,7 +78,13 @@ const importContract = {
 }
 
 /** The full oRPC contract tree served by the app's procedures. */
-export const contract = { import: importContract }
+export const contract = {
+  import: importContract,
+  /** Metrics tab (ticket #19): every block reads one Postgres view. */
+  metrics: {
+    overview: oc.output(MetricsOverviewSchema),
+  },
+}
 
 /** Client type helper (stable v1 name) so consumers can type oRPC clients. */
 export type ClientContract = ContractRouterClient<typeof contract>

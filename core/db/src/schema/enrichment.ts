@@ -182,6 +182,8 @@ export const providerUsage = pgTable(
     tokensOut: integer("tokens_out").notNull(),
     /** Synthetic cost in micro-currency units (1e-6) — never a float. */
     costMicros: integer("cost_micros").notNull(),
+    /** Wall-clock duration of the provider call, ms (Metrics speed view). */
+    durationMs: integer("duration_ms"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

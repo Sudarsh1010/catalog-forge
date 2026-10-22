@@ -299,6 +299,7 @@ async function translateProduct(
   // Every field was current or memoized: no provider call, no usage row.
   if (missing.length === 0) return
 
+  const translateStartedAt = Date.now()
   const call = await registry.run(
     tier ?? routingTierFor(item.messiness),
     (provider) =>
@@ -311,6 +312,7 @@ async function translateProduct(
         protectedTokens: item.protectedTokens,
       })
   )
+  const translateDurationMs = Date.now() - translateStartedAt
 
   // EC-088: fields whose "translation" equals the source are no-ops — the
   // provider had nothing to do. Only changed fields land; if none changed,
@@ -363,6 +365,7 @@ async function translateProduct(
     tokensIn: call.usage.tokensIn,
     tokensOut: call.usage.tokensOut,
     costMicros: costMicrosFor(call.usage),
+    durationMs: translateDurationMs,
   })
 }
 
