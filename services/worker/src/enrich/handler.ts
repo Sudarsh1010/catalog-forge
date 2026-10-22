@@ -18,7 +18,6 @@ import type { Database } from "@workspace/db"
 import {
   productEnrichments,
   imports,
-  products,
   providerUsage,
   rowLedger,
 } from "@workspace/db/schema"

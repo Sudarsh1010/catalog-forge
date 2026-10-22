@@ -201,7 +201,7 @@ async function parkedRows(
 describe("photo matching by ranked strategies (EC-072)", () => {
   it("matches by exact SKU in the filename, then title, then subfolder hint — and parks the rest with a reason", async () => {
     const imp = await seedUpload()
-    const worker = await runPipelineThroughMedia(imp.id)
+    await runPipelineThroughMedia(imp.id)
 
     const matches = await matchRows(imp.id)
     expect(matches).toEqual([

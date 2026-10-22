@@ -8,7 +8,7 @@
  * upsert-shaped replace of this Import's match rows — so a redelivered Job
  * converges on the identical state.
  */
-import { and, asc, eq, sql } from "drizzle-orm"
+import { and, asc, eq } from "drizzle-orm"
 
 import type { Database } from "@workspace/db"
 import {
