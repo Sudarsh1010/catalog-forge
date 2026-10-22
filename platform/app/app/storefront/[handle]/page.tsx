@@ -52,7 +52,8 @@ export default async function StorefrontProductPage({
   searchParams,
 }: PageProps<"/storefront/[handle]">) {
   const { handle } = await params
-  const { country } = await searchParams
+  const { country: rawCountry } = await searchParams
+  const country = Array.isArray(rawCountry) ? rawCountry[0] : rawCountry
   const locale = resolveLocale(country)
   const product = await getPublishedProduct(handle, locale)
 
