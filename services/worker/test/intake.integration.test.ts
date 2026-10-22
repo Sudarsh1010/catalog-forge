@@ -53,7 +53,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await db.db.execute(
-    sql`TRUNCATE jobs, imports, sheet_rows, import_files, cleaned_rows, clean_plans`
+    sql`TRUNCATE jobs, imports, sheet_rows, import_files, cleaned_rows, clean_plans CASCADE`
   )
 })
 

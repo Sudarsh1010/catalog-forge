@@ -36,6 +36,28 @@ export {
 } from "./clean/plan"
 export type { PlanCleanOptions, CleanStageTarget } from "./clean/plan"
 export { createCleanHandler } from "./clean/handler"
+export { createGroupHandler, buildProductDrafts } from "./group/handler"
+export { GROUP_BATCH_KEY, planGroupStage } from "./group/plan"
+export { identityKey, normalizeGtin, keyHash } from "./group/keys"
+export { mapColumns } from "./group/columns"
+export type { ColumnRoles } from "./group/columns"
+export { codeFamilyRelation, familyBase, UnionFind } from "./group/cluster"
+export { createMatchMediaHandler } from "./media/handler"
+export {
+  MEDIA_BATCH_KEY,
+  ENRICH_BATCH_SIZE,
+  enrichBatchKey,
+  translateBatchKey,
+  parseProductBatchKey,
+  planMatchMediaStage,
+} from "./media/plan"
+export type { PlanMatchMediaOptions } from "./media/plan"
+export { matchPhoto, splitPhotoPath } from "./media/match"
+export type {
+  MatchableProduct,
+  MatchableVariant,
+  PhotoMatch,
+} from "./media/match"
 export { publishImportEvent } from "./events"
 export { createIntakeHandler } from "./intake"
 export type { IntakeDeps } from "./intake"
