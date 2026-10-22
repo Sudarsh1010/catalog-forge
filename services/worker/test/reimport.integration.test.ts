@@ -70,7 +70,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await db.db.execute(
-    sql`TRUNCATE jobs, imports, sheet_rows, import_files, provider_pauses, job_retries CASCADE`
+    sql`TRUNCATE translation_memory, jobs, imports, sheet_rows, import_files, provider_pauses, job_retries CASCADE`
   )
   await flushTestRedis()
 })
@@ -400,11 +400,15 @@ describe("re-import key-diff (ticket #14)", () => {
 
     // The adoption patched the row without a provider call.
     expect(await usageCount(importB)).toBe(0)
+    // Ticket #15: an English-text change syncs the enrichment's English
+    // copy (a field patch — same row, no AI) so the re-run translation has
+    // the new source; the Out-of-Date hook flags affected translations.
     const enrichmentB = (await db.db.execute(sql`
       SELECT id, updated_at::text AS updated_at
       FROM product_enrichments WHERE product_id = ${productA.id}
     `)) as unknown as Array<{ id: string; updated_at: string }>
-    expect(enrichmentB).toEqual(enrichmentA)
+    expect(enrichmentB[0]!.id).toBe(enrichmentA[0]!.id)
+    expect(enrichmentB[0]!.updated_at).not.toBe(enrichmentA[0]!.updated_at)
   }, 60_000)
 
   it("new rows append and enrich; vanished Variants become Missing-from-Source until they reappear", async () => {

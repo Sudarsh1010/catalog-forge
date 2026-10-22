@@ -694,6 +694,84 @@ export function ImportDetail({
           )}
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-medium">
+            Translations ({detail.translations.total.toLocaleString()})
+            {detail.translations.outOfDate > 0 ? (
+              <span className="ml-2 text-amber-700 dark:text-amber-400">
+                {detail.translations.outOfDate.toLocaleString()} out of date
+              </span>
+            ) : null}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-2">
+          {detail.translations.rows.length === 0 ? (
+            <p className="border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
+              No translations yet — translation hasn&apos;t run.
+            </p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="text-xs">Product</TableHead>
+                  <TableHead className="w-16 text-xs">Locale</TableHead>
+                  <TableHead className="w-24 text-xs">Field</TableHead>
+                  <TableHead className="w-20 text-xs">Origin</TableHead>
+                  <TableHead className="w-28 text-xs">State</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {detail.translations.rows.map((translation) => (
+                  <TableRow
+                    key={`${translation.productId}:${translation.locale}:${translation.field}`}
+                  >
+                    <TableCell className="text-xs break-words">
+                      {translation.productTitle}
+                    </TableCell>
+                    <TableCell className="font-mono text-[11px]">
+                      {translation.locale}
+                    </TableCell>
+                    <TableCell className="font-mono text-[11px]">
+                      {translation.field}
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant="secondary"
+                        className={
+                          translation.origin === "manual"
+                            ? "bg-blue-500/15 text-blue-700 dark:text-blue-400"
+                            : "bg-muted text-muted-foreground"
+                        }
+                      >
+                        {translation.origin}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {translation.outOfDate ? (
+                        <Badge
+                          variant="secondary"
+                          className="bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                        >
+                          Out of date
+                        </Badge>
+                      ) : (
+                        <Badge
+                          variant="secondary"
+                          className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                        >
+                          Current
+                        </Badge>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

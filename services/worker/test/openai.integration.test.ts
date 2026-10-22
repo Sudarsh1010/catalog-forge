@@ -65,7 +65,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await db.db.execute(
-    sql`TRUNCATE jobs, imports, sheet_rows, import_files, provider_pauses, job_retries CASCADE`
+    sql`TRUNCATE translation_memory, jobs, imports, sheet_rows, import_files, provider_pauses, job_retries CASCADE`
   )
   await flushTestRedis()
 })

@@ -249,6 +249,36 @@ export async function loadImportDetail(
     `)
   )[0]!.count
 
+  // Translations with their Origin and Out-of-Date state (ticket #15) —
+  // the dashboard's per-translation surface.
+  const TRANSLATION_PAGE_SIZE = 200
+  const translationRows = rowsOf<{
+    product_id: string
+    product_title: string
+    locale: string
+    field: string
+    origin: "ai" | "manual"
+    out_of_date: boolean
+    updated_at: Date | string | null
+  }>(
+    await db.execute(sql`
+      SELECT t.product_id, p.title AS product_title, t.locale, t.field,
+             t.origin::text AS origin, t.out_of_date, t.updated_at
+      FROM product_translations t
+      JOIN products p ON p.id = t.product_id
+      WHERE t.import_id = ${id}
+      ORDER BY p.natural_key_hash, t.locale, t.field
+      LIMIT ${TRANSLATION_PAGE_SIZE}
+    `)
+  )
+  const translationTotals = rowsOf<{ total: number; out_of_date: number }>(
+    await db.execute(sql`
+      SELECT count(*)::int AS total,
+             count(*) FILTER (WHERE out_of_date)::int AS out_of_date
+      FROM product_translations WHERE import_id = ${id}
+    `)
+  )[0]!
+
   return {
     ...toImportDto(row),
     stages,
@@ -281,6 +311,19 @@ export async function loadImportDetail(
         enrichmentStatus:
           (entry.enrichment_status as "ready" | "needs_review" | null) ?? null,
         enrichedAt: toIso(entry.enriched_at),
+      })),
+    },
+    translations: {
+      total: translationTotals.total,
+      outOfDate: translationTotals.out_of_date,
+      rows: translationRows.map((entry) => ({
+        productId: entry.product_id,
+        productTitle: entry.product_title,
+        locale: entry.locale,
+        field: entry.field,
+        origin: entry.origin,
+        outOfDate: entry.out_of_date,
+        updatedAt: toIso(entry.updated_at),
       })),
     },
   }

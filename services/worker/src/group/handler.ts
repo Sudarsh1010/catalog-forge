@@ -30,6 +30,7 @@ import type { CleanColumnPlan, CleanedCell } from "@workspace/db/schema"
 import {
   cleanPlans,
   imports,
+  productEnrichments,
   products,
   rowLedger,
   variants,
@@ -583,6 +584,8 @@ interface FamilyVariant {
 
 interface FamilyProduct {
   id: string
+  /** The birth Import — translate re-runs requeue its Jobs (ticket #15). */
+  importId: string
   naturalKeyHash: string
   identityKind: "code" | "title"
   naturalKey: string
@@ -606,12 +609,14 @@ async function loadFamilyCatalog(
   familyKey: string
 ): Promise<FamilyCatalog> {
   const productRows = (await db.execute(sql`
-    SELECT id, natural_key_hash, identity_kind, natural_key, title, brand,
-           category, description, gtin, needs_review, review_reason
+    SELECT id, import_id, natural_key_hash, identity_kind, natural_key,
+           title, brand, category, description, gtin, needs_review,
+           review_reason
     FROM products
     WHERE store_id = ${storeId} AND family_key = ${familyKey}
   `)) as unknown as Array<{
     id: string
+    import_id: string
     natural_key_hash: string
     identity_kind: "code" | "title"
     natural_key: string
@@ -628,6 +633,7 @@ async function loadFamilyCatalog(
   for (const row of productRows) {
     const product: FamilyProduct = {
       id: row.id,
+      importId: row.import_id,
       naturalKeyHash: row.natural_key_hash,
       identityKind: row.identity_kind,
       naturalKey: row.natural_key,
@@ -996,6 +1002,21 @@ async function adoptProductDraft(
       .where(eq(products.id, existing.id))
   }
 
+  // English-text change on an adopted Product (ticket #15, GLOSSARY: Out of
+  // Date): the enrichment's English copy is synced (no AI — that would be a
+  // re-enrich), existing translations whose source hash no longer matches
+  // are flagged Out of Date (manual Origin rows kept, never overwritten),
+  // and the Product's AI translations re-run via its birth Import's
+  // covering translate Jobs.
+  const textPatch: Record<string, string> = {}
+  for (const field of ["title", "description", "category"] as const) {
+    const value = productPatch[field]
+    if (typeof value === "string") textPatch[field] = value
+  }
+  if (Object.keys(textPatch).length > 0) {
+    await flagTranslationsOutOfDate(tx, existing, textPatch)
+  }
+
   const presentHashes = new Set<string>()
   const appended: VariantDraft[] = []
   for (const variant of draft.variants) {
@@ -1130,6 +1151,116 @@ async function adoptProductDraft(
           eq(variants.missingFromSource, false)
         )
       )
+  }
+}
+
+/**
+ * Out-of-Date tracking for an adopted Product whose English text changed
+ * (ticket #15, GLOSSARY: Out of Date, Origin):
+ *
+ *   1. The enrichment's English copy is synced to the re-imported text —
+ *      a field patch, not a re-enrichment: no provider call, no usage row,
+ *      confidence/claims untouched. The translate Stage reads this copy as
+ *      its source text, so the re-run translates the NEW English.
+ *   2. Every translation of a CHANGED field is flagged `out_of_date` —
+ *      deliberately conservative: the enrichment's English is a
+ *      provider-formed copy, so the barrier cannot recompute the exact
+ *      hash a translation must pin. Manual-Origin rows are kept verbatim —
+ *      a translate upsert can never overwrite them (the
+ *      `origin <> 'manual'` guard) — the flag is the merchant's signal.
+ *      Over-flagging self-heals: the translate Stage clears the flag on
+ *      any row whose hash still matches the live source text.
+ *   3. AI re-runs happen for this Product only: the terminal translate
+ *      Jobs of the Product's birth Import whose deterministic Batch covers
+ *      it are requeued with reset attempts when AI work exists to redo.
+ *      Unchanged Products in those Batches cost nothing (their
+ *      translations still pin the current source hash — the translate
+ *      handler skips them; Translation Memory absorbs anything else that
+ *      was seen before).
+ */
+async function flagTranslationsOutOfDate(
+  tx: CatalogTx,
+  existing: FamilyProduct,
+  textPatch: Record<string, string>
+): Promise<void> {
+  await tx
+    .update(productEnrichments)
+    .set({ ...textPatch, updatedAt: new Date() })
+    .where(eq(productEnrichments.productId, existing.id))
+
+  const changedFields = Object.keys(textPatch)
+  await tx.execute(sql`
+    UPDATE product_translations
+    SET out_of_date = true, updated_at = now()
+    WHERE product_id = ${existing.id}::uuid
+      AND field IN (${sql.join(
+        changedFields.map((field) => sql`${field}`),
+        sql`, `
+      )})
+      AND NOT out_of_date
+  `)
+
+  const hasStaleAi = (await tx.execute(sql`
+    SELECT EXISTS (
+      SELECT 1 FROM product_translations
+      WHERE product_id = ${existing.id}::uuid
+        AND origin = 'ai'
+        AND field IN (${sql.join(
+          changedFields.map((field) => sql`${field}`),
+          sql`, `
+        )})
+    ) AS stale_ai
+  `)) as unknown as Array<{ stale_ai: boolean }>
+  const anyTranslations = (await tx.execute(sql`
+    SELECT EXISTS (
+      SELECT 1 FROM product_translations
+      WHERE product_id = ${existing.id}::uuid
+    ) AS any_rows
+  `)) as unknown as Array<{ any_rows: boolean }>
+  // A Product with no translation rows at all gets the same re-run chance:
+  // EC-088 no-ops (translation equal to source) write no row, so "no rows"
+  // is not proof the new text needs nothing.
+  if (!hasStaleAi[0]?.stale_ai && anyTranslations[0]?.any_rows) return
+
+  // This Product's 1-based ordinal in its birth Import's deterministic
+  // Batch order (ADR-0002) — the same order the planner and the translate
+  // handler read.
+  const ordinal = (await tx.execute(sql`
+    SELECT ordinal FROM (
+      SELECT id, ROW_NUMBER() OVER (ORDER BY natural_key_hash) AS ordinal
+      FROM products WHERE import_id = ${existing.importId}
+    ) ranked
+    WHERE ranked.id = ${existing.id}
+  `)) as unknown as Array<{ ordinal: number }>
+  const position = ordinal[0]?.ordinal
+  if (!position) return
+
+  const requeued = (await tx.execute(sql`
+    UPDATE jobs SET
+      status = 'pending',
+      attempts = 0,
+      lease_owner = NULL,
+      lease_expires_at = NULL,
+      available_at = NULL,
+      updated_at = now()
+    WHERE import_id = ${existing.importId}
+      AND stage = 'translate'
+      AND status IN ('completed', 'failed')
+      AND batch_key ~ '^products-[0-9]{6}-[0-9]{6}'
+      AND (regexp_match(
+            batch_key, '^products-([0-9]{6})-([0-9]{6})'
+          ))[1]::int <= ${position}
+      AND (regexp_match(
+            batch_key, '^products-([0-9]{6})-([0-9]{6})'
+          ))[2]::int >= ${position}
+    RETURNING id
+  `)) as unknown as Array<{ id: string }>
+  if (requeued.length > 0) {
+    log.info(`requeued translate jobs for out-of-date product`, {
+      productId: existing.id,
+      importId: existing.importId,
+      jobIds: requeued.map((row) => row.id),
+    })
   }
 }
 
