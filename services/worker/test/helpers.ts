@@ -10,7 +10,7 @@ import { createDb, type Db } from "@workspace/db"
 import { runMigrations } from "@workspace/db/migrate"
 import { createCache, type Cache } from "@workspace/cache"
 import { createStorage, type Storage } from "@workspace/storage"
-import { CACHE_KEY_PREFIX } from "@workspace/pipeline"
+import { CACHE_KEY_PREFIX, familyKeyOf } from "@workspace/pipeline"
 import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3"
 import { sql } from "drizzle-orm"
 import postgres from "postgres"
@@ -133,6 +133,14 @@ export interface SeedImportOptions {
   stage?: string
   sheetFormat?: "csv" | "xlsx"
   originalFilename?: string
+  /**
+   * Sheet lineage for re-import key-diff (ticket #14). Defaults to the
+   * normalized original filename; each seeded Import gets a unique default
+   * filename so suites that seed several unrelated Imports never
+   * accidentally share a family — pass `familyKey` (or the same
+   * `originalFilename`) explicitly to test a re-import.
+   */
+  familyKey?: string
   /** Header cells intake landed (clean tests need column names). */
   sheetHeader?: string[]
 }
@@ -157,13 +165,17 @@ export async function seedImport(
   const storeId = options.storeId ?? "test-store"
   const contentHash =
     options.contentHash ?? crypto.randomUUID().replaceAll("-", "")
-  const sheetObjectKey = `t2-tests/${id}/sheet/${options.originalFilename ?? "sheet.csv"}`
+  const originalFilename =
+    options.originalFilename ?? `sheet-${id.slice(0, 8)}.csv`
+  const sheetObjectKey = `t2-tests/${id}/sheet/${originalFilename}`
   await db.db.execute(sql`
     INSERT INTO imports (
-      id, store_id, content_hash, original_filename, sheet_format,
-      sheet_object_key, status, stage, sheet_header
+      id, store_id, content_hash, family_key, original_filename,
+      sheet_format, sheet_object_key, status, stage, sheet_header
     ) VALUES (
-      ${id}, ${storeId}, ${contentHash}, ${options.originalFilename ?? "sheet.csv"},
+      ${id}, ${storeId}, ${contentHash},
+      ${options.familyKey ?? familyKeyOf(originalFilename)},
+      ${originalFilename},
       ${options.sheetFormat ?? "csv"}, ${sheetObjectKey},
       ${options.status ?? "queued"}, ${options.stage ?? "intake"},
       ${options.sheetHeader ? JSON.stringify(options.sheetHeader) : null}::jsonb

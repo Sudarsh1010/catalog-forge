@@ -20,6 +20,7 @@ import {
   imports,
   productTranslations,
   providerUsage,
+  translationMemory,
 } from "@workspace/db/schema"
 import { TARGET_LOCALES } from "@workspace/pipeline"
 import { createLogger } from "@workspace/log"
@@ -30,7 +31,7 @@ import { healBatchRows } from "../poison"
 import {
   routingTierFor,
   routingTierFrom,
-  syntheticCostMicros,
+  costMicrosFor,
   type ProviderRegistry,
   type RoutingTier,
   type TranslateField,
@@ -186,6 +187,63 @@ async function protectedTokensOf(
   return [...new Set(tokens)]
 }
 
+/** sha256 of the exact English source text — the translation/TM key. */
+function sourceHash(text: string): string {
+  return createHash("sha256").update(text, "utf8").digest("hex")
+}
+
+interface ExistingTranslation {
+  field: string
+  sourceTextHash: string
+  origin: "ai" | "manual"
+  outOfDate: boolean
+}
+
+async function existingTranslationsOf(
+  db: Database,
+  productId: string,
+  locale: string
+): Promise<Map<string, ExistingTranslation>> {
+  const rows = await db
+    .select({
+      field: productTranslations.field,
+      sourceTextHash: productTranslations.sourceTextHash,
+      origin: productTranslations.origin,
+      outOfDate: productTranslations.outOfDate,
+    })
+    .from(productTranslations)
+    .where(
+      sql`${productTranslations.productId} = ${productId}::uuid
+          AND ${productTranslations.locale} = ${locale}`
+    )
+  return new Map(rows.map((row) => [row.field, row]))
+}
+
+/**
+ * Translation Memory lookup (GLOSSARY: Out of Date, ticket #15): identical
+ * source text reuses the cached translation and never pays a second
+ * provider call.
+ */
+async function memoryHit(
+  db: Database,
+  storeId: string,
+  locale: string,
+  field: TranslateField,
+  hash: string
+): Promise<string | null> {
+  const rows = await db
+    .select({ text: translationMemory.text })
+    .from(translationMemory)
+    .where(
+      sql`${translationMemory.storeId} = ${storeId}
+          AND ${translationMemory.locale} = ${locale}
+          AND ${translationMemory.field} = ${field}
+          AND ${translationMemory.sourceTextHash} = ${hash}`
+    )
+    .limit(1)
+  return rows[0]?.text ?? null
+}
+
 async function translateProduct(
   db: Database,
   registry: ProviderRegistry,
@@ -195,12 +253,60 @@ async function translateProduct(
   locale: (typeof TARGET_LOCALES)[number],
   tier: RoutingTier | null
 ): Promise<void> {
+  // Per-field triage before any provider involvement:
+  //   current — a translation already pins this exact source hash: nothing
+  //     to do (this is what makes a requeued Batch free for unchanged
+  //     Products), and a stale Out-of-Date flag self-heals;
+  //   memoized — Translation Memory has the source hash cached: write the
+  //     row from the cache, no provider call, no usage;
+  //   missing — the only fields the provider call is about.
+  const existing = await existingTranslationsOf(db, item.productId, locale)
+  const missing: TranslateField[] = []
+  for (const field of Object.keys(item.fields) as TranslateField[]) {
+    const hash = sourceHash(item.fields[field]!)
+    const row = existing.get(field)
+    if (row && row.sourceTextHash === hash) {
+      // The English source is back in sync with this translation.
+      if (row.outOfDate) {
+        await db
+          .update(productTranslations)
+          .set({ outOfDate: false, updatedAt: new Date() })
+          .where(
+            sql`${productTranslations.productId} = ${item.productId}::uuid
+                AND ${productTranslations.locale} = ${locale}
+                AND ${productTranslations.field} = ${field}`
+          )
+      }
+      continue
+    }
+    const cached = await memoryHit(db, storeId, locale, field, hash)
+    if (cached !== null) {
+      await upsertTranslation(
+        db,
+        storeId,
+        importId,
+        item,
+        locale,
+        field,
+        cached,
+        hash
+      )
+      continue
+    }
+    missing.push(field)
+  }
+
+  // Every field was current or memoized: no provider call, no usage row.
+  if (missing.length === 0) return
+
   const call = await registry.run(
     tier ?? routingTierFor(item.messiness),
     (provider) =>
       provider.translate({
         locale,
-        fields: item.fields,
+        fields: Object.fromEntries(
+          missing.map((field) => [field, item.fields[field]!])
+        ) as Partial<Record<TranslateField, string>>,
         brand: item.brand,
         protectedTokens: item.protectedTokens,
       })
@@ -209,11 +315,9 @@ async function translateProduct(
   // EC-088: fields whose "translation" equals the source are no-ops — the
   // provider had nothing to do. Only changed fields land; if none changed,
   // the call cost nothing.
-  const changed = (Object.keys(item.fields) as TranslateField[]).filter(
+  const changed = missing.filter(
     (field) => call.value.fields[field] !== item.fields[field]
   )
-  if (changed.length === 0) return
-
   for (const field of changed) {
     await upsertTranslation(
       db,
@@ -222,9 +326,33 @@ async function translateProduct(
       item,
       locale,
       field,
-      call.value.fields[field]!
+      call.value.fields[field]!,
+      sourceHash(item.fields[field]!)
     )
+    // Cache the fresh AI output so identical source text never re-pays.
+    await db
+      .insert(translationMemory)
+      .values({
+        storeId,
+        locale,
+        field,
+        sourceTextHash: sourceHash(item.fields[field]!),
+        text: call.value.fields[field]!,
+        providerId: call.usage.providerId,
+        model: call.usage.model,
+      })
+      .onConflictDoUpdate({
+        target: [
+          translationMemory.storeId,
+          translationMemory.locale,
+          translationMemory.field,
+          translationMemory.sourceTextHash,
+        ],
+        set: { text: sql`EXCLUDED.text`, updatedAt: new Date() },
+      })
   }
+  if (changed.length === 0) return
+
   await db.insert(providerUsage).values({
     storeId,
     importId,
@@ -234,7 +362,7 @@ async function translateProduct(
     model: call.usage.model,
     tokensIn: call.usage.tokensIn,
     tokensOut: call.usage.tokensOut,
-    costMicros: syntheticCostMicros(call.usage),
+    costMicros: costMicrosFor(call.usage),
   })
 }
 
@@ -245,7 +373,8 @@ async function upsertTranslation(
   item: BatchItem,
   locale: (typeof TARGET_LOCALES)[number],
   field: TranslateField,
-  text: string
+  text: string,
+  sourceTextHash: string
 ): Promise<void> {
   await db
     .insert(productTranslations)
@@ -257,10 +386,10 @@ async function upsertTranslation(
       field,
       text,
       // Pins the exact English source (GLOSSARY: Out of Date).
-      sourceTextHash: createHash("sha256")
-        .update(item.fields[field]!, "utf8")
-        .digest("hex"),
+      sourceTextHash,
       origin: "ai",
+      // Fresh AI output of the current source is current by definition.
+      outOfDate: false,
     })
     // A manual Origin always wins over later AI output (GLOSSARY).
     .onConflictDoUpdate({
@@ -272,6 +401,7 @@ async function upsertTranslation(
       set: {
         text: sql`EXCLUDED.text`,
         sourceTextHash: sql`EXCLUDED.source_text_hash`,
+        outOfDate: sql`false`,
         updatedAt: new Date(),
       },
       setWhere: sql`product_translations.origin <> 'manual'`,

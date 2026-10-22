@@ -12,7 +12,7 @@ import {
   createProviderRegistry,
   createStubProvider,
   routingTierFor,
-  syntheticCostMicros,
+  costMicrosFor,
   type EnrichInput,
   type Provider,
   type TranslateInput,
@@ -364,7 +364,7 @@ describe("failure classes (the port Ticket 6's chaos stub drives)", () => {
 
   it("prices a call deterministically from token counts", () => {
     expect(
-      syntheticCostMicros({
+      costMicrosFor({
         providerId: "stub",
         model: "stub-demo-v1",
         tokensIn: 1_000,
@@ -375,7 +375,7 @@ describe("failure classes (the port Ticket 6's chaos stub drives)", () => {
       50 + 400
     )
     expect(
-      syntheticCostMicros({
+      costMicrosFor({
         providerId: "stub",
         model: "stub-demo-v1",
         tokensIn: 0,

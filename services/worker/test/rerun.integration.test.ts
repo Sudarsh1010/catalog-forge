@@ -58,7 +58,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await db.db.execute(
-    sql`TRUNCATE jobs, imports, sheet_rows, import_files, cleaned_rows, clean_plans CASCADE`
+    sql`TRUNCATE translation_memory, jobs, imports, sheet_rows, import_files, cleaned_rows, clean_plans CASCADE`
   )
 })
 
@@ -75,10 +75,12 @@ async function seedProduct(
   const id = crypto.randomUUID()
   await db.db.execute(sql`
     INSERT INTO products (
-      id, store_id, import_id, identity_kind, natural_key,
+      id, store_id, import_id, family_key, identity_kind, natural_key,
       natural_key_hash, title
     ) VALUES (
-      ${id}, 'test-store', ${importId}, 'code', ${naturalKey},
+      ${id}, 'test-store', ${importId},
+      (SELECT family_key FROM imports WHERE id = ${importId}),
+      'code', ${naturalKey},
       ${keyHash(naturalKey)}, ${naturalKey}
     )
   `)

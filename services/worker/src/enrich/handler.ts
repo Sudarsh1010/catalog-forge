@@ -30,7 +30,7 @@ import { healBatchRows } from "../poison"
 import {
   routingTierFor,
   routingTierFrom,
-  syntheticCostMicros,
+  costMicrosFor,
   type EnrichInput,
   type EnrichmentResult,
   type ProviderRegistry,
@@ -72,6 +72,14 @@ export function createEnrichHandler(deps: EnrichDeps): JobHandler {
       range.start,
       range.end
     )
+    // Raw Sheet Row cells per Product — the evidence Claims cite. One join
+    // for the whole Batch; the prompt renders them row by row.
+    const sourceRowsByProduct = await loadSourceRows(
+      db,
+      job.importId,
+      imp.sheetHeader,
+      batch.map((product) => product.id)
+    )
     // The tier travels on the Job (stamped at plan time via the Messiness
     // Score); a provider-less Job falls back to per-product routing inside
     // enrichProduct, where the full score is known.
@@ -83,7 +91,8 @@ export function createEnrichHandler(deps: EnrichDeps): JobHandler {
         job.storeId,
         job.importId,
         product,
-        tier
+        tier,
+        sourceRowsByProduct.get(product.id)
       )
     }
     // A retry that succeeded heals the poison quarantine (EC-122): rows
@@ -102,17 +111,23 @@ export function createEnrichHandler(deps: EnrichDeps): JobHandler {
 interface ImportRecord {
   id: string
   status: string
+  /** The sheet's column headers — names the provider's Claims can cite. */
+  sheetHeader: string[] | null
 }
 
 async function loadImport(
   db: Database,
   importId: string
 ): Promise<ImportRecord | null> {
-  const rows = await db
-    .select({ id: imports.id, status: imports.status })
+  const rows = (await db
+    .select({
+      id: imports.id,
+      status: imports.status,
+      sheetHeader: imports.sheetHeader,
+    })
     .from(imports)
     .where(eq(imports.id, importId))
-    .limit(1)
+    .limit(1)) as ImportRecord[]
   return rows[0] ?? null
 }
 
@@ -177,13 +192,64 @@ async function loadBatchProducts(
   }))
 }
 
+/**
+ * The raw Sheet Row cells behind each Product's `row_ledger` membership —
+ * header-named (imports.sheet_header order; unnamed overflow columns fall
+ * back to `column N`), exactly as the supplier sent them (GLOSSARY: Sheet
+ * Row). One join for the whole Batch, keyed by Product.
+ */
+async function loadSourceRows(
+  db: Database,
+  importId: string,
+  sheetHeader: string[] | null,
+  productIds: string[]
+): Promise<
+  Map<string, Array<{ rowIndex: number; values: Record<string, string> }>>
+> {
+  const byProduct = new Map<
+    string,
+    Array<{ rowIndex: number; values: Record<string, string> }>
+  >()
+  if (productIds.length === 0) return byProduct
+  const rows = (await db.execute(sql`
+    SELECT rl.product_id, sr.row_index, sr.raw
+    FROM row_ledger rl
+    JOIN sheet_rows sr
+      ON sr.import_id = rl.import_id AND sr.row_index = rl.row_index
+    WHERE rl.import_id = ${importId}
+      AND rl.state <> 'failed'
+      AND rl.product_id IN (${sql.join(
+        productIds.map((id) => sql`${id}::uuid`),
+        sql`, `
+      )})
+    ORDER BY rl.product_id, sr.row_index
+  `)) as unknown as Array<{
+    product_id: string
+    row_index: number
+    raw: unknown[] | null
+  }>
+  const header = sheetHeader ?? []
+  for (const row of rows) {
+    const values: Record<string, string> = {}
+    ;(row.raw ?? []).forEach((cell, index) => {
+      if (cell === null || cell === undefined) return
+      values[header[index] ?? `column ${index + 1}`] = String(cell)
+    })
+    const list = byProduct.get(row.product_id) ?? []
+    list.push({ rowIndex: row.row_index, values })
+    byProduct.set(row.product_id, list)
+  }
+  return byProduct
+}
+
 async function enrichProduct(
   db: Database,
   registry: ProviderRegistry,
   storeId: string,
   importId: string,
   product: BatchProduct,
-  tier: RoutingTier | null
+  tier: RoutingTier | null,
+  sourceRowValues?: Array<{ rowIndex: number; values: Record<string, string> }>
 ): Promise<void> {
   const memberRows = (await db.execute(sql`
     SELECT row_index FROM row_ledger
@@ -233,6 +299,7 @@ async function enrichProduct(
       photoCount
     ),
     sourceRows: memberRows.map((row) => row.row_index),
+    ...(sourceRowValues !== undefined ? { sourceRowValues } : {}),
   }
 
   const call = await registry.run(
@@ -262,7 +329,7 @@ async function enrichProduct(
     model: call.usage.model,
     tokensIn: call.usage.tokensIn,
     tokensOut: call.usage.tokensOut,
-    costMicros: syntheticCostMicros(call.usage),
+    costMicros: costMicrosFor(call.usage),
   })
 }
 

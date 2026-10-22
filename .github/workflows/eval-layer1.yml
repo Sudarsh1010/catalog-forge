@@ -1,0 +1,65 @@
+# Eval Set Layer 1 scoring (spec #11, ticket #13): the committed messy sheet
+# is run through the FULL pipeline in Demo Mode — no API key anywhere — and
+# scored against the Gold Labels. A red run means the deterministic layer
+# (grouping, dedupe, price cents, units, photo matching) regressed.
+name: eval-layer1
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  layer1:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: catalog_forge
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d catalog_forge"
+          --health-interval 5s --health-timeout 3s --health-retries 12
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+
+      # Garage (S3) has no shell, so it runs as a raw container and the
+      # provisioning script targets it via GARAGE=… (scripts/garage-provision.sh).
+      - name: Start Garage (S3)
+        run: |
+          docker run -d --name garage -p 9000:3900 \
+            -v "$PWD/garage.toml:/etc/garage/garage.toml:ro" \
+            dxflrs/garage:v1.3.1
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:9000/ >/dev/null && break
+            sleep 1
+          done
+      - name: Provision Garage
+        run: >-
+          GARAGE="docker exec -i garage /garage -c /etc/garage/garage.toml"
+          ./scripts/garage-provision.sh
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Layer 1 scoring (keyless Demo Mode)
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/catalog_forge
+          REDIS_URL: redis://127.0.0.1:6379
+          S3_ENDPOINT: http://127.0.0.1:9000
+        run: pnpm --filter @workspace/worker eval:l1

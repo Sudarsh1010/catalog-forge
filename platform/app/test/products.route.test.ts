@@ -56,11 +56,11 @@ async function seedImport(): Promise<string> {
   const id = crypto.randomUUID()
   await db.db.execute(sql`
     INSERT INTO imports (
-      id, store_id, content_hash, original_filename, sheet_format,
+      id, store_id, content_hash, family_key, original_filename, sheet_format,
       sheet_object_key, status, stage, row_count, sheet_header
     ) VALUES (
       ${id}, 'default', ${crypto.randomUUID().replaceAll("-", "")},
-      'supplier-sheet.csv', 'csv', 'imports/default/x/sheet.csv',
+      'supplier-sheet.csv', 'supplier-sheet.csv', 'csv', 'imports/default/x/sheet.csv',
       'completed', 'finalise', 12,
       ${JSON.stringify([
         "SKU",

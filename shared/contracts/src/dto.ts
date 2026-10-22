@@ -74,6 +74,22 @@ export const ProductRowSchema = z.object({
 })
 export type ProductRowDto = z.infer<typeof ProductRowSchema>
 
+/**
+ * One localized field of one Product (GLOSSARY: Origin, Out of Date):
+ * `origin` says who produced it (manual always wins), `outOfDate` flags a
+ * translation whose English source changed after it was made.
+ */
+export const TranslationRowSchema = z.object({
+  productId: z.string(),
+  productTitle: z.string(),
+  locale: z.string(),
+  field: z.string(),
+  origin: z.enum(["ai", "manual"]),
+  outOfDate: z.boolean(),
+  updatedAt: z.string().nullable(),
+})
+export type TranslationRowDto = z.infer<typeof TranslationRowSchema>
+
 /** One Import as the browser sees it: read-only projection (ADR-0004). */
 export const ImportDtoSchema = z.object({
   id: z.string(),
@@ -111,6 +127,12 @@ export const ImportDetailSchema = ImportDtoSchema.extend({
     total: z.number(),
   }),
   products: z.object({ rows: z.array(ProductRowSchema), total: z.number() }),
+  /** Per-translation surface incl. the Out-of-Date state (ticket #15). */
+  translations: z.object({
+    rows: z.array(TranslationRowSchema),
+    total: z.number(),
+    outOfDate: z.number(),
+  }),
 })
 export type ImportDetailDto = z.infer<typeof ImportDetailSchema>
 

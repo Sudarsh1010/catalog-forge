@@ -32,7 +32,7 @@ beforeAll(async () => {
 })
 
 beforeEach(async () => {
-  await db.db.execute(sql`TRUNCATE jobs, imports CASCADE`)
+  await db.db.execute(sql`TRUNCATE translation_memory, jobs, imports CASCADE`)
 })
 
 afterAll(async () => {
