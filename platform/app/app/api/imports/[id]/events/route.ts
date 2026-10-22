@@ -10,16 +10,12 @@
  * Each stream entry becomes an SSE event carrying the Redis entry ID, so
  * EventSource reconnects resume exactly where the client left off.
  */
-import { eq } from "drizzle-orm"
-
 import { createCache, type Cache } from "@workspace/cache"
 import { CACHE_KEY_PREFIX, importStreamKey } from "@workspace/pipeline"
 
-import { imports } from "@workspace/db/schema"
-
 import { requireEnv } from "@/lib/env"
 import { getDb } from "@/lib/db"
-import { toImportDto } from "@/lib/imports"
+import { loadImportDetail } from "@/lib/imports"
 
 export const runtime = "nodejs"
 
@@ -69,12 +65,11 @@ export async function GET(
 ): Promise<Response> {
   const { id } = await params
   const db = getDb().db
-  const rows = await db
-    .select()
-    .from(imports)
-    .where(eq(imports.id, id))
-    .limit(1)
-  if (rows.length === 0) {
+  // The snapshot is the full detail read model: per-stage Job counts, the
+  // Row Ledger reconciliation, errors, Parked Photos and Products — the
+  // stream is lossy, so the snapshot is what makes drops harmless.
+  const detail = await loadImportDetail(db, id)
+  if (!detail) {
     return Response.json(
       { error: { code: "not_found", message: "Import not found." } },
       { status: 404 }
@@ -115,7 +110,7 @@ export async function GET(
       }
       try {
         // 1. Snapshot from Postgres — the state of record.
-        send({ event: "snapshot", data: JSON.stringify(toImportDto(rows[0]!)) })
+        send({ event: "snapshot", data: JSON.stringify(detail) })
 
         // 2. Tail the capped stream from the last-seen ID.
         let cursor = lastEventId

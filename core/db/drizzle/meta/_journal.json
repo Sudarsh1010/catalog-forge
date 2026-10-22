@@ -50,6 +50,13 @@
       "when": 1792635195161,
       "tag": "0006_ambitious_wildside",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792656767529,
+      "tag": "0007_needy_rafael_vega",
+      "breakpoints": true
     }
   ]
 }
