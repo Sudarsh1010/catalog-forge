@@ -1,4 +1,5 @@
 import { createCache, type Cache } from "@workspace/cache"
+import { CACHE_KEY_PREFIX } from "@workspace/pipeline"
 
 import { requireEnv } from "./env"
 
@@ -15,7 +16,7 @@ export function getCache(): Cache {
   if (!globalForCache.__catalogForgeCache) {
     globalForCache.__catalogForgeCache = createCache({
       url: requireEnv("REDIS_URL"),
-      keyPrefix: "catalog-forge:",
+      keyPrefix: CACHE_KEY_PREFIX,
     })
   }
 

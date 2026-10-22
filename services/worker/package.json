@@ -1,0 +1,41 @@
+{
+  "name": "@workspace/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "sheet:generate": "tsx scripts/generate-sheet.ts",
+    "resilience:e2e": "tsx scripts/resilience-e2e.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.928.0",
+    "@aws-sdk/lib-storage": "^3.928.0",
+    "@workspace/cache": "workspace:*",
+    "@workspace/db": "workspace:*",
+    "@workspace/log": "workspace:*",
+    "@workspace/pipeline": "workspace:*",
+    "@workspace/storage": "workspace:*",
+    "csv-parse": "^6.1.0",
+    "drizzle-orm": "^0.45.4",
+    "postgres": "^3.4.9",
+    "saxes": "^6.0.0",
+    "yauzl": "^3.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/yauzl": "^2.10.3",
+    "@types/yazl": "^3.3.1",
+    "@workspace/typescript-config": "workspace:*",
+    "tsx": "^4.23.15",
+    "typescript": "^5",
+    "vitest": "^3.2.7",
+    "yazl": "^3.3.1"
+  }
+}

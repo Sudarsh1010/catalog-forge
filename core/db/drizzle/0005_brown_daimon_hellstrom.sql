@@ -1,0 +1,1 @@
+ALTER TABLE "product_enrichments" ADD COLUMN "messiness" integer DEFAULT 0 NOT NULL;
