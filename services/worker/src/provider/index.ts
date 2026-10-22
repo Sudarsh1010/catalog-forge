@@ -11,3 +11,4 @@ export {
   STUB_MODEL,
   REVIEW_CONFIDENCE_THRESHOLD,
 } from "./stub"
+export type { StubChaosOptions } from "./stub"

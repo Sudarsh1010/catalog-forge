@@ -10,7 +10,9 @@
     "dev": "tsx watch src/main.ts",
     "start": "tsx src/main.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "sheet:generate": "tsx scripts/generate-sheet.ts",
+    "resilience:e2e": "tsx scripts/resilience-e2e.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.928.0",

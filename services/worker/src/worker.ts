@@ -17,8 +17,12 @@ import { createLogger } from "@workspace/log"
 import { publishImportEvent } from "./events"
 import type { WorkerConfig } from "./config"
 import { resolveConfig } from "./config"
+import { backoffDelayMs } from "./backoff"
 import type { HandlerRegistry } from "./handlers"
 import { adoptQueuedImports, sweepStalledStageAdvances } from "./imports"
+import { enterProviderPause, resumeExpiredPauses } from "./pause"
+import type { PoisonHandler } from "./poison"
+import { adoptJobRetries } from "./retries"
 import type { StagePlannerRegistry } from "./stages"
 import type { ClaimedJob } from "./jobs"
 import {
@@ -26,8 +30,10 @@ import {
   completeJob,
   failJob,
   heartbeatJob,
+  requeueJob,
   sweepExpiredJobs,
 } from "./jobs"
+import { ProviderError } from "./provider/port"
 
 const log = createLogger({ service: "worker" })
 
@@ -57,6 +63,14 @@ export interface CreateWorkerOptions {
    * Jobs are planned the moment its stage value flips.
    */
   planners?: StagePlannerRegistry
+  /**
+   * Poison path (ADR-0003): what a terminally Failed Job means for the
+   * domain — per Stage, because only the Stage knows which Sheet Rows its
+   * Batch covers. `main.ts` registers the enrich/translate writer that
+   * records Failed-with-reason in the Row Ledger; the dashboard retry
+   * requeues the Job afterwards.
+   */
+  poisonHandlers?: Record<string, PoisonHandler>
 }
 
 /** Reassemble a full Job row around a claim (lease fields reflect the claim). */
@@ -66,6 +80,7 @@ function asJob(claimed: ClaimedJob, workerId: string): Job {
     status: "running",
     leaseOwner: workerId,
     leaseExpiresAt: null,
+    availableAt: null,
     lastError: null,
     createdAt: new Date(0),
     updatedAt: new Date(0),
@@ -77,6 +92,8 @@ export function createWorker(options: CreateWorkerOptions): WorkerHandle {
   const { db } = options
   /** In-flight handler executions by job id — heartbeat input and stop barrier. */
   const inFlight = new Map<string, Promise<void>>()
+  /** Running loop ticks — stop() lets them settle before declaring quiet. */
+  const ticks = new Set<Promise<void>>()
   const timers: NodeJS.Timeout[] = []
   let started = false
 
@@ -130,18 +147,155 @@ export function createWorker(options: CreateWorkerOptions): WorkerHandle {
       })
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
-      await failJob(db.db, config, claimed.id, reason)
-      log.error(`job failed`, {
-        stage: claimed.stage,
-        batchKey: claimed.batchKey,
-        workerId: config.workerId,
-        reason,
-      })
+      await recordFault(claimed, error, reason)
     }
   }
 
+  /**
+   * Fault policy (EC-082's three classes, three behaviors). Provider faults
+   * on provider-stamped Jobs never consume the lease machinery's blunt
+   * failJob path while they are still retryable:
+   *
+   *   - `rate_limited` → the provider's Pause engages, honoring Retry-After;
+   *     the Job requeues to claim exactly when the Pause lifts and the
+   *     attempt is refunded (throttling is the provider's signal, not the
+   *     Job's failure). Other providers keep working; the affected Imports
+   *     surface "Paused — resuming in X minutes" plus a `paused` event.
+   *   - `server_error` / `timeout` / `invalid_json` → exponential backoff
+   *     with jitter; attempts still count, so a permanently broken call
+   *     exhausts maxAttempts and terminates via the poison path.
+   *   - anything else (wiring bugs, contract violations) → failJob, whose
+   *     terminal outcome records the Row Ledger consequences.
+   */
+  async function recordFault(
+    claimed: ClaimedJob,
+    error: unknown,
+    reason: string
+  ): Promise<void> {
+    const fault = error instanceof ProviderError ? error.fault : null
+    if (fault && claimed.providerId) {
+      if (fault.class === "rate_limited") {
+        const retryAfterMs = fault.retryAfterMs ?? config.rateLimitRetryAfterMs
+        await requeueJob(db.db, config, claimed.id, {
+          delayMs: retryAfterMs,
+          refundAttempt: true,
+          reason,
+        })
+        const entered = await enterProviderPause(db.db, {
+          storeId: claimed.storeId,
+          providerId: claimed.providerId,
+          resumeAtMs: config.now() + retryAfterMs,
+          reason,
+        })
+        if (options.cache) {
+          for (const importId of entered.affectedImportIds) {
+            await publishImportEvent(options.cache, {
+              importId,
+              type: "paused",
+              data: {
+                importId,
+                providerId: claimed.providerId,
+                resumeAt: entered.resumeAt,
+                reason,
+              },
+            })
+          }
+        }
+        log.warn(`provider paused — resuming per Retry-After`, {
+          providerId: claimed.providerId,
+          retryAfterMs,
+          affectedImports: entered.affectedImportIds.length,
+          workerId: config.workerId,
+        })
+        return
+      }
+      // Backoff rides on the Job's own poison counter (max_attempts): the
+      // row is authoritative — config.maxAttempts only seeds planners.
+      if (claimed.attempts < claimed.maxAttempts) {
+        const delayMs = backoffDelayMs(claimed.attempts, {
+          baseMs: config.backoffBaseMs,
+          maxMs: config.backoffMaxMs,
+          jitter: config.jitter,
+        })
+        await requeueJob(db.db, config, claimed.id, {
+          delayMs,
+          refundAttempt: false,
+          reason,
+        })
+        log.warn(`job requeued with backoff`, {
+          stage: claimed.stage,
+          batchKey: claimed.batchKey,
+          faultClass: fault.class,
+          attempt: claimed.attempts,
+          delayMs,
+          workerId: config.workerId,
+        })
+        return
+      }
+    }
+    const terminal = await failJob(db.db, config, claimed.id, reason)
+    if (terminal) {
+      const poison = options.poisonHandlers?.[claimed.stage]
+      if (poison) {
+        try {
+          await poison(
+            db.db,
+            {
+              storeId: claimed.storeId,
+              importId: claimed.importId,
+              stage: claimed.stage,
+              batchKey: claimed.batchKey,
+              attempts: claimed.attempts,
+            },
+            reason
+          )
+        } catch (poisonError) {
+          // The Job is already terminally Failed; a broken ledger writer
+          // must not escape as an unhandled rejection on top of it.
+          log.error(`poison handler failed after terminal job failure`, {
+            stage: claimed.stage,
+            jobId: claimed.id,
+            error:
+              poisonError instanceof Error
+                ? poisonError.message
+                : String(poisonError),
+            workerId: config.workerId,
+          })
+        }
+      }
+      log.error(`job failed terminally — poison path recorded`, {
+        stage: claimed.stage,
+        batchKey: claimed.batchKey,
+        jobId: claimed.id,
+        attempts: claimed.attempts,
+        reason,
+        workerId: config.workerId,
+      })
+      return
+    }
+    log.error(`job failed`, {
+      stage: claimed.stage,
+      batchKey: claimed.batchKey,
+      workerId: config.workerId,
+      reason,
+    })
+  }
+
   async function claimTick(): Promise<void> {
+    // Automatic Pause resume (GLOSSARY: Pause — "resuming in X minutes"):
+    // checked on the fast loop so a lifted Pause hands Jobs back within one
+    // claim interval, with no human action.
+    const resumed = await resumeExpiredPauses(db.db, config.now())
+    for (const pause of resumed) {
+      log.info(`provider Pause lifted — Import resumed`, {
+        ...pause,
+        workerId: config.workerId,
+      })
+    }
     for (let i = 0; i < config.batchSize; i++) {
+      // A stop() during this tick must not claim fresh work (a residual
+      // tick can wake long after stop began when the pool was saturated).
+      if (!started) return
       const claimed = await claimJob(db.db, config)
       if (!claimed) return
       const execution = execute(claimed).finally(() =>
@@ -173,6 +327,15 @@ export function createWorker(options: CreateWorkerOptions): WorkerHandle {
     if (adopted > 0) {
       log.info(`sweeper adopted queued imports`, {
         count: adopted,
+        workerId: config.workerId,
+      })
+    }
+    // Safety net, part 1b: adopt dashboard retry requests (ADR-0004) — the
+    // poison path's re-entry point. The Job requeues with reset attempts.
+    const retried = await adoptJobRetries(db.db)
+    for (const retry of retried) {
+      log.info(`sweeper adopted retry request — poison job requeued`, {
+        ...retry,
         workerId: config.workerId,
       })
     }
@@ -208,14 +371,18 @@ export function createWorker(options: CreateWorkerOptions): WorkerHandle {
 
   function schedule(fn: () => Promise<void>, ms: number): NodeJS.Timeout {
     const run = async (): Promise<void> => {
-      try {
-        await fn()
-      } catch (error) {
-        log.error(`loop iteration failed`, {
-          error: error instanceof Error ? error.message : String(error),
-          workerId: config.workerId,
-        })
-      }
+      const tick = (async () => {
+        try {
+          await fn()
+        } catch (error) {
+          log.error(`loop iteration failed`, {
+            error: error instanceof Error ? error.message : String(error),
+            workerId: config.workerId,
+          })
+        }
+      })()
+      ticks.add(tick)
+      void tick.finally(() => ticks.delete(tick))
     }
     void run()
     return setInterval(() => void run(), ms)
@@ -232,8 +399,12 @@ export function createWorker(options: CreateWorkerOptions): WorkerHandle {
       timers.push(schedule(sweepTick, config.sweepIntervalMs))
     },
     async stop() {
-      for (const timer of timers.splice(0)) clearTimeout(timer)
       started = false
+      for (const timer of timers.splice(0)) clearTimeout(timer)
+      // Let the current loop ticks finish FIRST (they may still claim), so
+      // their executions are registered in inFlight before the barrier.
+      await Promise.allSettled(ticks)
+      ticks.clear()
       await Promise.allSettled(inFlight.values())
       inFlight.clear()
     },

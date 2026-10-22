@@ -309,17 +309,114 @@ function usageOf(value: unknown, input: unknown): ProviderUsage {
   }
 }
 
+// ------------------------------------------------------------------ chaos --
+
+/**
+ * Chaos flags (spec: Provider handling — the stub doubles as the chaos test
+ * double). Every flag produces the exact typed {@link ProviderError} fault
+ * class the Job machinery keys on (EC-082); the flags are constructor
+ * options in tests and env in dev (`main.ts`). With no flags set the stub
+ * consumes no randomness and behaves exactly like plain Demo Mode.
+ */
+export interface StubChaosOptions {
+  /** Seed for the fault rolls: same seed + same call sequence = same faults. */
+  seed?: number
+  /** Probability [0,1] that a call fails with a `server_error` (5xx). */
+  failureRate?: number
+  /** Every call AFTER this many calls is rejected `rate_limited` (429). */
+  rateLimitAfter?: number
+  /** How many calls are throttled once `rateLimitAfter` is reached (default: unlimited). */
+  rateLimitFor?: number
+  /** Retry-After carried by `rate_limited` faults (default 30s). */
+  retryAfterMs?: number
+  /** Probability [0,1] that a call returns unusable output (`invalid_json`). */
+  invalidJsonRate?: number
+}
+
+/** Tiny seeded PRNG (mulberry32): deterministic chaos from a 32-bit seed. */
+function mulberry32(seed: number): () => number {
+  let state = seed >>> 0
+  return () => {
+    state = (state + 0x6d2b79f5) | 0
+    let t = Math.imul(state ^ (state >>> 15), 1 | state)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+const DEFAULT_RETRY_AFTER_MS = 30_000
+
+/** Per-call fault decision shared by enrich and translate (one call counter). */
+class Chaos {
+  readonly #rolls: () => number
+  readonly #failureRate: number
+  readonly #invalidJsonRate: number
+  readonly #rateLimitAfter: number | null
+  readonly #rateLimitUntil: number | null
+  readonly #retryAfterMs: number
+  #calls = 0
+
+  constructor(options: StubChaosOptions) {
+    this.#rolls =
+      options.seed !== undefined ? mulberry32(options.seed) : Math.random
+    this.#failureRate = clampRate(options.failureRate)
+    this.#invalidJsonRate = clampRate(options.invalidJsonRate)
+    this.#rateLimitAfter = options.rateLimitAfter ?? null
+    this.#rateLimitUntil =
+      options.rateLimitAfter === undefined
+        ? null
+        : options.rateLimitAfter +
+          (options.rateLimitFor ?? Number.POSITIVE_INFINITY)
+    this.#retryAfterMs = options.retryAfterMs ?? DEFAULT_RETRY_AFTER_MS
+  }
+
+  /** Throws the call's fault, or returns silently when the call goes through. */
+  next(): void {
+    this.#calls++
+    if (
+      this.#rateLimitAfter !== null &&
+      this.#calls > this.#rateLimitAfter &&
+      this.#calls <= this.#rateLimitUntil!
+    ) {
+      throw new ProviderError({
+        class: "rate_limited",
+        retryAfterMs: this.#retryAfterMs,
+      })
+    }
+    if (this.#invalidJsonRate === 0 && this.#failureRate === 0) return
+    const roll = this.#rolls()
+    if (roll < this.#invalidJsonRate) {
+      throw new ProviderError({
+        class: "invalid_json",
+        detail:
+          "chaos flag invalidJsonRate: provider returned unusable output (EC-081)",
+      })
+    }
+    if (roll < this.#invalidJsonRate + this.#failureRate) {
+      throw new ProviderError({ class: "server_error", status: 500 })
+    }
+  }
+}
+
+function clampRate(value: number | undefined): number {
+  if (value === undefined) return 0
+  return Math.min(1, Math.max(0, value))
+}
+
 /** The Demo Mode provider: deterministic, keyless, zero Claims. */
-export function createStubProvider(): Provider {
+export function createStubProvider(options?: StubChaosOptions): Provider {
+  const chaos = new Chaos(options ?? {})
   return {
     id: STUB_PROVIDER_ID,
     async enrich(input: EnrichInput): Promise<ProviderCall<EnrichmentResult>> {
+      chaos.next()
       const value = enrichDeterministically(input)
       return { value, usage: usageOf(value, input) }
     },
     async translate(
       input: TranslateInput
     ): Promise<ProviderCall<TranslateResult>> {
+      chaos.next()
       const value = translateDeterministically(input)
       return { value, usage: usageOf(value, input) }
     },

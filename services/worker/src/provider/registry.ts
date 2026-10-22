@@ -21,6 +21,13 @@ export interface ProviderRegistry {
     tier: RoutingTier,
     operation: (provider: Provider) => Promise<T>
   ): Promise<T>
+  /**
+   * Which provider serves `tier` — the planner stamps Jobs with it at plan
+   * time, so the Pause claim gate can hold exactly those Jobs (spec:
+   * "routing tiers are assigned to Jobs at plan time"). Throws for an
+   * unregistered tier, mirroring `run`.
+   */
+  providerIdForTier(tier: RoutingTier): string
 }
 
 /**
@@ -70,6 +77,15 @@ export function createProviderRegistry(
     }
   }
   return {
+    providerIdForTier(tier: RoutingTier): string {
+      const resolved = byTier.get(tier)
+      if (!resolved) {
+        throw new Error(
+          `provider registry: no provider registered for tier "${tier}"`
+        )
+      }
+      return resolved.provider.id
+    },
     async run<T>(
       tier: RoutingTier,
       operation: (provider: Provider) => Promise<T>

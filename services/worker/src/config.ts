@@ -19,6 +19,14 @@ export interface WorkerConfig {
   batchSize: number
   /** Injectable clock (ms epoch). Defaults to `Date.now`. */
   now: () => number
+  /** Backoff base for 5xx/timeout/invalid-JSON requeues (EC-082). */
+  backoffBaseMs: number
+  /** Cap for a single backoff delay. */
+  backoffMaxMs: number
+  /** Jitter source for backoff (EC-083); tests inject a deterministic fn. */
+  jitter: () => number
+  /** Retry-After honored when a rate_limited fault carries none (ms). */
+  rateLimitRetryAfterMs: number
 }
 
 export const DEFAULT_CONFIG: Omit<WorkerConfig, "workerId"> = {
@@ -29,6 +37,10 @@ export const DEFAULT_CONFIG: Omit<WorkerConfig, "workerId"> = {
   maxAttempts: 5,
   batchSize: 5,
   now: () => Date.now(),
+  backoffBaseMs: 1_000,
+  backoffMaxMs: 60_000,
+  jitter: () => Math.random(),
+  rateLimitRetryAfterMs: 30_000,
 }
 
 export function resolveConfig(overrides?: Partial<WorkerConfig>): WorkerConfig {

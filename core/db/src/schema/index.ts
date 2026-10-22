@@ -6,6 +6,8 @@
 //
 export * from "./jobs"
 export * from "./imports"
+export * from "./provider_pauses"
+export * from "./job_retries"
 export * from "./import_files"
 export * from "./sheet_rows"
 export * from "./cleaned_rows"

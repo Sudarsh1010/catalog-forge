@@ -21,6 +21,15 @@ export function routingTierFor(messinessScore: number): RoutingTier {
 }
 
 /**
+ * The Job's plan-time routing tier, when it carries a valid one — a Job
+ * stamped at plan time routes ALL its calls to the provider its claim gate
+ * knows about; `null` (unstamped/legacy Jobs) leaves routing per call.
+ */
+export function routingTierFrom(value: string | null): RoutingTier | null {
+  return value === "fast" || value === "strong" ? value : null
+}
+
+/**
  * Provider failure classes (EC-082's three behaviors + EC-081 structured
  * output). `rate_limited` carries the honored Retry-After; `invalid_json`
  * covers malformed/unusable provider output INCLUDING the translate

@@ -13,16 +13,25 @@ export {
   heartbeatJob,
   completeJob,
   failJob,
+  requeueJob,
   sweepExpiredJobs,
   rowsOf,
 } from "./jobs"
-export type { ClaimedJob } from "./jobs"
+export type { ClaimedJob, RequeueOptions } from "./jobs"
 export {
   adoptQueuedImports,
   failImport,
   completeIntake,
   sweepStalledStageAdvances,
 } from "./imports"
+export { enterProviderPause, resumeExpiredPauses } from "./pause"
+export type { ProviderPauseInput, EnteredPause, ResumedPause } from "./pause"
+export { failBatchRows, healBatchRows, isBatchStage } from "./poison"
+export type { PoisonedJob, PoisonHandler } from "./poison"
+export { adoptJobRetries } from "./retries"
+export type { AdoptedRetry } from "./retries"
+export { backoffDelayMs } from "./backoff"
+export type { BackoffOptions } from "./backoff"
 export type {
   StagePlanTarget,
   StagePlanner,
@@ -70,6 +79,7 @@ export {
   createProviderRegistry,
   createStubProvider,
   routingTierFor,
+  routingTierFrom,
   syntheticCostMicros,
   ProviderError,
   STUB_PROVIDER_ID,
