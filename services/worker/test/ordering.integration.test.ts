@@ -112,8 +112,8 @@ describe("stage-gated claiming (EC-123)", () => {
     expect(claimed?.stage).toBe("translate")
   })
 
-  it("keeps non-pipeline Jobs claimable — including Jobs without an Import row", async () => {
-    const orphan = await insertJob(crypto.randomUUID(), "demo", "batch-1")
+  it("keeps Jobs claimable when their Import row is gone", async () => {
+    const orphan = await insertJob(crypto.randomUUID(), "enrich", "batch-1")
     const claimed = await claimJob(db.db, config)
     expect(claimed?.id).toBe(orphan)
   })

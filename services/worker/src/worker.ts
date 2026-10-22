@@ -238,8 +238,9 @@ export function createWorker(options: CreateWorkerOptions): WorkerHandle {
     if (terminal) {
       const poison = options.poisonHandlers?.[claimed.stage]
       if (poison) {
+        let quarantined: unknown
         try {
-          await poison(
+          quarantined = await poison(
             db.db,
             {
               storeId: claimed.storeId,
@@ -261,6 +262,25 @@ export function createWorker(options: CreateWorkerOptions): WorkerHandle {
                 ? poisonError.message
                 : String(poisonError),
             workerId: config.workerId,
+          })
+        }
+        // Row Ledger writers return the number of rows they quarantined —
+        // surface it as `row_failed` (GLOSSARY: Event Stream, lossy feed;
+        // Postgres stays the source of truth).
+        if (
+          typeof quarantined === "number" &&
+          quarantined > 0 &&
+          options.cache
+        ) {
+          await publishImportEvent(options.cache, {
+            importId: claimed.importId,
+            type: "row_failed",
+            data: {
+              importId: claimed.importId,
+              stage: claimed.stage,
+              rows: quarantined,
+              reason,
+            },
           })
         }
       }

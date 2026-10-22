@@ -16,9 +16,14 @@
 import { sql } from "drizzle-orm"
 
 import type { Database } from "@workspace/db"
-import { TARGET_LOCALES } from "@workspace/pipeline"
+import {
+  TARGET_LOCALES,
+  enrichBatchKey,
+  translateBatchKey,
+} from "@workspace/pipeline"
 
 import type { StagePlanTarget } from "../stages"
+import { planTimeMessinessSql } from "../messiness"
 import { routingTierFor, type RoutingTier } from "../provider/port"
 
 /** The single deterministic Batch identity of the media barrier. */
@@ -40,35 +45,8 @@ export interface PlanMatchMediaOptions {
   providerForTier?: (tier: RoutingTier) => string
 }
 
-/** Deterministic enrich Batch identity: 1-based inclusive product ordinal range. */
-export function enrichBatchKey(start: number, end: number): string {
-  return `products-${String(start).padStart(6, "0")}-${String(end).padStart(6, "0")}`
-}
-
-/** Translate Batch identity: the product range times one target locale. */
-export function translateBatchKey(
-  start: number,
-  end: number,
-  locale: string
-): string {
-  return `${enrichBatchKey(start, end)}:${locale}`
-}
-
-/**
- * Parse a product-batch key back to its inclusive range and (for translate)
- * its locale. `locale` is `null` for enrich keys.
- */
-export function parseProductBatchKey(
-  key: string
-): { start: number; end: number; locale: string | null } | null {
-  const match = /^products-(\d{6})-(\d{6})(?::([a-z]{2}))?$/.exec(key)
-  if (!match) return null
-  return {
-    start: Number(match[1]),
-    end: Number(match[2]),
-    locale: match[3] ?? null,
-  }
-}
+/** Deterministic enrich/translate Batch identities live in @workspace/pipeline
+ * (shared with the app's failed-row → Job mapping). */
 
 export async function planMatchMediaStage(
   db: Database,
@@ -89,10 +67,11 @@ export async function planMatchMediaStage(
 
     // Product ordinals in natural-key-hash order: same products, same
     // Batches — across re-plans and restarts (ADR-0002). Each product's
-    // Messiness Score is recomputed with EXACTLY the enrich handler's
-    // `messinessScore` formula minus photos (media matching has not run
-    // yet — the score finalizes at enrich time; the plan-time copy only
-    // picks the Batch's routing tier, which Demo Mode treats identically).
+    // Messiness Score is recomputed from the SHARED weights
+    // (`src/messiness.ts`, the enrich handler's formula) minus photos —
+    // media matching has not run yet, so the score finalizes at enrich
+    // time; the plan-time copy only picks the Batch's routing tier, which
+    // Demo Mode treats identically.
     const rows = (await tx.execute(sql`
       WITH scored AS (
         SELECT p.id, p.identity_kind, p.description, p.category, p.brand, p.gtin,
@@ -100,18 +79,7 @@ export async function planMatchMediaStage(
         FROM products p
         WHERE p.import_id = ${target.importId}
       )
-      SELECT s.ordinal, (
-        (s.identity_kind = 'title')::int * 30
-        + (CASE WHEN COALESCE(s.description, '') = '' THEN 20 ELSE 0 END)
-        + (CASE WHEN COALESCE(s.category, '') = '' THEN 15 ELSE 0 END)
-        + (CASE WHEN COALESCE(s.brand, '') = '' THEN 10 ELSE 0 END)
-        + (CASE WHEN s.gtin IS NULL THEN 10 ELSE 0 END)
-        + (CASE WHEN EXISTS (
-             SELECT 1 FROM variants v
-             WHERE v.product_id = s.id AND v.needs_review
-           ) THEN 15 ELSE 0 END)
-        + LEAST((SELECT count(*) FROM variants v WHERE v.product_id = s.id), 4) * 2
-      )::int AS messiness
+      SELECT s.ordinal, ${planTimeMessinessSql()} AS messiness
       FROM scored s
       ORDER BY s.ordinal
     `)) as unknown as Array<{ ordinal: number; messiness: number }>

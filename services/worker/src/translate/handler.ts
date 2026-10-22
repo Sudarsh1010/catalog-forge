@@ -25,7 +25,7 @@ import { TARGET_LOCALES } from "@workspace/pipeline"
 import { createLogger } from "@workspace/log"
 
 import type { JobContext, JobHandler } from "../handlers"
-import { parseProductBatchKey } from "../media/plan"
+import { parseProductBatchKey } from "@workspace/pipeline"
 import { healBatchRows } from "../poison"
 import {
   routingTierFor,

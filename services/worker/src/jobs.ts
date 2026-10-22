@@ -9,7 +9,12 @@ import { sql, type SQL } from "drizzle-orm"
 
 import type { Database } from "@workspace/db"
 import type { Job } from "@workspace/db/schema"
-import { isStage, nextStage, type Stage } from "@workspace/pipeline"
+import {
+  isStage,
+  nextStage,
+  PIPELINE_STAGES,
+  type Stage,
+} from "@workspace/pipeline"
 
 import type { WorkerConfig } from "./config"
 import type { StagePlannerRegistry } from "./stages"
@@ -33,7 +38,7 @@ interface ClaimedRow {
   id: string
   store_id: string
   import_id: string
-  stage: string
+  stage: Stage
   batch_key: string
   attempts: number
   max_attempts: number
@@ -71,18 +76,17 @@ export async function claimJob(
   // completes, so the gate serializes stages exactly, with deterministic
   // Batch boundaries untouched. Non-pipeline stages (and Jobs whose Import
   // row is gone) order as 0/99 and stay claimable.
-  const stageOrder = (column: "jobs" | "imports"): SQL =>
-    column === "jobs"
-      ? sql`CASE j.stage
-              WHEN 'intake' THEN 1 WHEN 'clean' THEN 2 WHEN 'group' THEN 3
-              WHEN 'match-media' THEN 4 WHEN 'enrich' THEN 5
-              WHEN 'translate' THEN 6 WHEN 'finalise' THEN 7
-              ELSE 0 END`
-      : sql`CASE i.stage
-              WHEN 'intake' THEN 1 WHEN 'clean' THEN 2 WHEN 'group' THEN 3
-              WHEN 'match-media' THEN 4 WHEN 'enrich' THEN 5
-              WHEN 'translate' THEN 6 WHEN 'finalise' THEN 7
-              ELSE 99 END`
+  //
+  // The order derives from PIPELINE_STAGES — the shared constant is the
+  // single source; this CASE can never drift from it.
+  const stageOrder = (column: "jobs" | "imports"): SQL => {
+    const alias = column === "jobs" ? "j" : "i"
+    const missing = column === "jobs" ? 0 : 99
+    const arms = PIPELINE_STAGES.map(
+      (stage, index) => sql`WHEN ${stage} THEN ${index + 1} `
+    )
+    return sql`CASE ${sql.raw(alias)}.stage ${sql.join(arms, sql``)}ELSE ${missing} END`
+  }
   const rows = rowsOf<ClaimedRow>(
     await db.execute(sql`
       UPDATE jobs SET

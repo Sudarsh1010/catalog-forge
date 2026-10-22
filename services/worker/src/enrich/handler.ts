@@ -24,7 +24,8 @@ import {
 import { createLogger } from "@workspace/log"
 
 import type { JobContext, JobHandler } from "../handlers"
-import { parseProductBatchKey } from "../media/plan"
+import { parseProductBatchKey } from "@workspace/pipeline"
+import { messinessScore } from "../messiness"
 import { healBatchRows } from "../poison"
 import {
   routingTierFor,
@@ -168,31 +169,6 @@ async function loadBatchProducts(
     needsReview: row.needs_review,
     reviewReason: row.review_reason,
   }))
-}
-
-/**
- * The Messiness Score signal (GLOSSARY): missing fields, identity
- * evidence, variant review state and photo spread. Recorded per Product and
- * used as the routing fallback — the primary tier travels on the Job
- * (`routing_tier`, stamped at plan time from the same formula), so every
- * call of a Job goes to the provider its claim gate knows about.
- */
-export function messinessScore(
-  product: BatchProduct,
-  variantCount: number,
-  variantNeedsReview: boolean,
-  photoCount: number
-): number {
-  let score = 0
-  if (product.identityKind === "title") score += 30
-  if (!product.description) score += 20
-  if (!product.category) score += 15
-  if (!product.brand) score += 10
-  if (!product.gtin) score += 10
-  if (variantNeedsReview) score += 15
-  score += Math.min(variantCount, 4) * 2
-  score += Math.min(photoCount, 3) * 2
-  return Math.min(100, score)
 }
 
 async function enrichProduct(

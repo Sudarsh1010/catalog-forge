@@ -3,7 +3,6 @@
 // truth: everything derived from it can be rebuilt from it. No cleaned
 // projection here — that is later Stage machinery's output.
 import {
-  index,
   integer,
   jsonb,
   pgTable,
@@ -37,9 +36,9 @@ export const sheetRows = pgTable(
       .defaultNow(),
   },
   (t) => [
-    // Identity + idempotent intake: re-running the Stage upserts, never appends.
+    // Identity + idempotent intake: re-running the Stage upserts, never
+    // appends. (The unique index doubles as the import scan index — no twin.)
     uniqueIndex("sheet_rows_identity_key").on(t.importId, t.rowIndex),
-    index("sheet_rows_import_idx").on(t.importId, t.rowIndex),
   ]
 )
 

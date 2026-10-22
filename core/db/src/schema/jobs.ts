@@ -14,6 +14,8 @@ import {
   uuid,
 } from "drizzle-orm/pg-core"
 
+import { pipelineStage } from "./imports"
+
 export const jobStatus = pgEnum("job_status", [
   /** Awaiting claim. */
   "pending",
@@ -33,7 +35,7 @@ export const jobs = pgTable(
     storeId: text("store_id").notNull(),
     /** Batch identity: the Import, the Stage, and the deterministic Batch slice. */
     importId: uuid("import_id").notNull(),
-    stage: text("stage").notNull(),
+    stage: pipelineStage("stage").notNull(),
     batchKey: text("batch_key").notNull(),
     status: jobStatus("status").notNull().default("pending"),
     /** Execution count; incremented on every claim. 5 = terminal Failed. */

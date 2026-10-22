@@ -53,7 +53,23 @@ export function createFinaliseHandler(deps: FinaliseDeps): JobHandler {
       )
     }
 
-    await repairMissingLedgerRows(db, job.storeId, job.importId)
+    const repaired = await repairMissingLedgerRows(
+      db,
+      job.storeId,
+      job.importId
+    )
+    if (repaired > 0) {
+      await publishImportEvent(deps.cache, {
+        importId: job.importId,
+        type: "row_failed",
+        data: {
+          importId: job.importId,
+          stage: "finalise",
+          rows: repaired,
+          reason: REPAIRED_ROW_REASON,
+        },
+      })
+    }
 
     const counts = await ledgerCounts(db, job.importId)
     const total = counts.done + counts.needsReview + counts.failed
@@ -109,8 +125,8 @@ async function repairMissingLedgerRows(
   db: Database,
   storeId: string,
   importId: string
-): Promise<void> {
-  await db.execute(sql`
+): Promise<number> {
+  const result = (await db.execute(sql`
     INSERT INTO row_ledger (store_id, import_id, row_index, state, failure_reason)
     SELECT ${storeId}, ${importId}, sr.row_index, 'failed',
            ${REPAIRED_ROW_REASON}
@@ -121,7 +137,9 @@ async function repairMissingLedgerRows(
         WHERE rl.import_id = sr.import_id AND rl.row_index = sr.row_index
       )
     ON CONFLICT (import_id, row_index) DO NOTHING
-  `)
+    RETURNING row_index
+  `)) as unknown as Array<{ row_index: number }>
+  return result.length
 }
 
 interface Counts {

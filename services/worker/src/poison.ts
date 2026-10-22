@@ -7,15 +7,17 @@
  *
  * Scope is stage knowledge: only enrich/translate Jobs cover a product
  * Batch, so `failBatchRows` maps the deterministic Batch key back to the
- * exact Sheet Rows the handler would have processed. A successful retry
- * heals its rows back to their durable terminal state (`healBatchRows`) —
- * failed is a quarantine, never a verdict about data that later landed.
+ * exact Sheet Rows the handler would have processed — and refreshes the
+ * quarantine reason on rows already recorded Failed, never overwriting a
+ * terminal Done/Needs Review verdict. A successful retry heals its rows
+ * back to their durable terminal state (`healBatchRows`) — failed is a
+ * quarantine, never a verdict about data that later landed.
  */
 import { sql } from "drizzle-orm"
 
 import type { Database } from "@workspace/db"
 
-import { parseProductBatchKey } from "./media/plan"
+import { parseProductBatchKey } from "@workspace/pipeline"
 
 /** The failed Job, as the poison writer sees it. */
 export interface PoisonedJob {
@@ -46,11 +48,11 @@ const IS_BATCH_STAGE: Record<string, true> = {
 }
 
 /**
- * Record a terminally-failed Job's rows as Failed-with-reason in the Row
- * Ledger. Rows already terminal through a previous success are left alone
- * (at-least-once convergence, ADR-0003); ungrouped rows (no Product) belong
- * to no Batch and stay with finalise's reconciliation. Returns the number
- * of rows quarantined.
+ * Record a terminally-failed Job's Batch in the Row Ledger. Terminal
+ * verdicts are never overwritten: Done rows stay Done and Needs Review rows
+ * keep their reason; only rows already quarantined Failed pick up the fresh
+ * reason (ungrouped rows belong to no Batch and stay with finalise's
+ * reconciliation). Returns the number of rows (re-)marked.
  */
 export async function failBatchRows(
   db: Database,
@@ -76,7 +78,11 @@ export async function failBatchRows(
       updated_at = now()
     WHERE import_id = ${job.importId}
       AND product_id IN (SELECT id FROM batch)
-      AND state <> 'failed'
+      -- Terminal verdicts are never overwritten (ADR-0003): a Done row stays
+      -- Done and a Needs Review row keeps its reason when a later Job for
+      -- its Batch dies. Only an already-quarantined row picks up the fresh
+      -- reason (the newest poison, not the first).
+      AND state NOT IN ('done', 'needs_review')
     RETURNING row_index
   `)) as unknown as Array<{ row_index: number }>
   return result.length

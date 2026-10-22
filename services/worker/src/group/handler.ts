@@ -118,7 +118,7 @@ export function createGroupHandler(): JobHandler {
     const roles = mapColumns(header, columns)
 
     // The barrier observes ALL rows: cleaned ones become SourceRows; rows
-    // whose clean chunk died land in the ledger as Failed (accounting).
+    // whose clean Batch died land in the ledger as Failed (accounting).
     const rows: SourceRow[] = []
     const neverCleaned: number[] = []
     await scanRows(db, job.importId, (rowIndex, cleaned) => {

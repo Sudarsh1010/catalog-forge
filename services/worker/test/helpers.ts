@@ -208,7 +208,7 @@ export async function seedJob(
     VALUES (
       ${options.storeId ?? "test-store"},
       ${options.importId ?? crypto.randomUUID()},
-      ${options.stage ?? "demo"},
+      ${options.stage ?? "enrich"},
       ${options.batchKey ?? "batch-1"},
       ${options.maxAttempts ?? 5}
     )

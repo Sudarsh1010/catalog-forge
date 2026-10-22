@@ -64,12 +64,23 @@ services:
   # normal dev flow runs the worker via `pnpm dev` (turbo).
   worker:
     build:
-      context: ..
+      context: .
       dockerfile: services/worker/Dockerfile
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/catalog_forge
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://garage:9000
+      S3_REGION: us-east-1
+      S3_BUCKET: catalog-forge
+      S3_ACCESS_KEY_ID: GK0123456789abcdef01234567
+      S3_SECRET_ACCESS_KEY: 941431a5c0f40a678c1ecf010982a2a23f9536ada8d3893cd0641d78ac6cf53c
+      S3_FORCE_PATH_STYLE: "true"
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      garage:
         condition: service_healthy
     profiles: ["full"]
 

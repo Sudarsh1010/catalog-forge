@@ -47,7 +47,12 @@ export function toImportDto(row: Import): ImportDto {
 // Read-only across the app↔worker contract (ADR-0004): aggregates over
 // worker-owned tables, never writes.
 
-import { PIPELINE_STAGES, type Stage } from "@workspace/pipeline"
+import {
+  PIPELINE_STAGES,
+  PRODUCT_BATCH_KEY_PATTERN,
+  PRODUCT_BATCH_KEY_PREFIX_PATTERN,
+  type Stage,
+} from "@workspace/pipeline"
 import type { Database } from "@workspace/db"
 import { eq, sql } from "drizzle-orm"
 
@@ -237,15 +242,11 @@ export async function loadImportDetail(
       ),
       failed_jobs AS (
         SELECT id,
-               (regexp_match(
-                 batch_key, '^products-([0-9]{6})-([0-9]{6})'
-               ))[1]::int AS lo,
-               (regexp_match(
-                 batch_key, '^products-([0-9]{6})-([0-9]{6})'
-               ))[2]::int AS hi
+               (regexp_match(batch_key, ${PRODUCT_BATCH_KEY_PATTERN}))[1]::int AS lo,
+               (regexp_match(batch_key, ${PRODUCT_BATCH_KEY_PATTERN}))[2]::int AS hi
         FROM jobs
         WHERE import_id = ${id} AND status = 'failed'
-          AND batch_key ~ '^products-[0-9]{6}-[0-9]{6}'
+          AND batch_key ~ ${PRODUCT_BATCH_KEY_PREFIX_PATTERN}
       )
       SELECT
         (SELECT total FROM totals) AS total,

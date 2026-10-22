@@ -1,12 +1,12 @@
 /**
  * The clean Stage's planner (ADR-0002 plan-then-execute).
  *
- * When an Import enters `clean`, ALL row-chunk Jobs are inserted up front
- * with deterministic boundaries (row-index chunks of a fixed constant size),
- * and the per-column decisions the chunk Jobs will execute against are
+ * When an Import enters `clean`, ALL row-Batch Jobs are inserted up front
+ * with deterministic boundaries (row-index Batches of a fixed constant size),
+ * and the per-column decisions the Batch Jobs will execute against are
  * computed once by a deterministic scan of the raw rows: decimal-locale
  * majority vote (EC-038), currency votes from symbols and header hints
- * (EC-040), and header unit hints (EC-026). Chunk Jobs are independent and
+ * (EC-040), and header unit hints (EC-026). Batch Jobs are independent and
  * may run concurrently or out of order — they never re-derive these votes.
  *
  * Re-planning is safe and idempotent: boundaries depend only on the row
@@ -22,7 +22,7 @@ import { scanCurrency, type CurrencyScan } from "./currency"
 import { scanNumber, type DecimalLocale } from "./number"
 import { looksLikeQuantity, unitFromHeader, type UnitFamily } from "./units"
 
-/** Fixed constant chunk size: one Job per 500-row slice (production). */
+/** Fixed constant Batch size: one Job per 500-row slice (production). */
 export const CLEAN_CHUNK_SIZE = 500
 
 export interface CleanStageTarget {
@@ -31,7 +31,7 @@ export interface CleanStageTarget {
 }
 
 export interface PlanCleanOptions {
-  /** Tests shrink the constant to exercise multi-chunk Imports quickly. */
+  /** Tests shrink the constant to exercise multi-Batch Imports quickly. */
   chunkSize?: number
 }
 
@@ -69,7 +69,7 @@ export async function planCleanStage(
 ): Promise<void> {
   const chunkSize = options?.chunkSize ?? CLEAN_CHUNK_SIZE
   if (!Number.isInteger(chunkSize) || chunkSize < 1) {
-    throw new Error(`clean plan: invalid chunk size ${chunkSize}`)
+    throw new Error(`clean plan: invalid Batch size ${chunkSize}`)
   }
 
   const headerRows = (await db.execute(sql`
@@ -97,9 +97,10 @@ export async function planCleanStage(
 
   await db.transaction(async (tx) => {
     await tx.execute(sql`
-      INSERT INTO clean_plans (import_id, columns)
-      VALUES (${target.importId}, ${JSON.stringify(columns)}::jsonb)
+      INSERT INTO clean_plans (import_id, store_id, columns)
+      VALUES (${target.importId}, ${target.storeId}, ${JSON.stringify(columns)}::jsonb)
       ON CONFLICT (import_id) DO UPDATE SET
+        store_id = EXCLUDED.store_id,
         columns = EXCLUDED.columns,
         updated_at = now()
     `)

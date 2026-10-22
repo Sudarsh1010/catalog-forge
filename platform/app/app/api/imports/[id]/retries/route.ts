@@ -14,10 +14,11 @@ import { imports } from "@workspace/db/schema"
 import { DEFAULT_STORE_ID } from "@workspace/pipeline"
 
 import { getDb } from "@/lib/db"
+import { UUID_RE } from "@/lib/imports"
 
 export const runtime = "nodejs"
 
-const UUID_RE =
+const UUID_JOB_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export async function POST(
@@ -26,6 +27,13 @@ export async function POST(
 ): Promise<Response> {
   const { id } = await params
   const db = getDb().db
+
+  if (!UUID_RE.test(id)) {
+    return Response.json(
+      { error: { code: "not_found", message: "Import not found." } },
+      { status: 404 }
+    )
+  }
 
   const existing = await db
     .select({ id: imports.id })
@@ -61,7 +69,7 @@ export async function POST(
       )
     }
     const invalid = raw.some(
-      (value) => typeof value !== "string" || !UUID_RE.test(value)
+      (value) => typeof value !== "string" || !UUID_JOB_RE.test(value)
     )
     if (invalid) {
       return Response.json(

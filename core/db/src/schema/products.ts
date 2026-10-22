@@ -74,8 +74,6 @@ export const products = pgTable(
       t.naturalKeyHash
     ),
     index("products_import_idx").on(t.importId),
-    // Cross-Import lookups (re-import diffing, EC-066/EC-067 — later scope).
-    index("products_store_key_idx").on(t.storeId, t.naturalKeyHash),
   ]
 )
 

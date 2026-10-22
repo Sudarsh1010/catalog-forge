@@ -10,6 +10,8 @@
  */
 import { useEffect, useRef } from "react"
 
+import { IMPORT_EVENT_TYPES } from "@workspace/pipeline"
+
 import type { ImportDto } from "@/lib/imports"
 
 interface ImportEventEnvelope {
@@ -81,13 +83,7 @@ export function useImportEvents(
         // ignore malformed snapshot
       }
     })
-    for (const type of [
-      "stage_changed",
-      "job_completed",
-      "row_failed",
-      "paused",
-      "import_done",
-    ]) {
+    for (const type of IMPORT_EVENT_TYPES) {
       source.addEventListener(type, (event) =>
         applyEnvelope((event as MessageEvent<string>).data)
       )

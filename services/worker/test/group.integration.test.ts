@@ -19,9 +19,9 @@ import { GROUP_BATCH_KEY, planGroupStage } from "../src/group/plan.js"
 import {
   enrichBatchKey,
   parseProductBatchKey,
-  planMatchMediaStage,
   translateBatchKey,
-} from "../src/media/plan.js"
+} from "@workspace/pipeline"
+import { planMatchMediaStage } from "../src/media/plan.js"
 import { createWorker, defineHandlers } from "../src/index.js"
 import {
   connectTestDb,
@@ -421,9 +421,10 @@ describe("barrier fan-out (deterministic Batch boundaries)", () => {
       stage: string
       batch_key: string
     }>
+    // pipeline_stage orders by pipeline position (ADR-0002), not alphabetically.
     expect(jobs).toEqual([
-      { stage: "enrich", batch_key: enrichBatchKey(1, 3) },
       { stage: "match-media", batch_key: "media" },
+      { stage: "enrich", batch_key: enrichBatchKey(1, 3) },
       { stage: "translate", batch_key: translateBatchKey(1, 3, "de") },
       { stage: "translate", batch_key: translateBatchKey(1, 3, "fr") },
     ])
