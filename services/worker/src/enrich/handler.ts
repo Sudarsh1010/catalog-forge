@@ -155,12 +155,16 @@ async function loadBatchProducts(
 }
 
 /**
- * The Messiness Score signal (GLOSSARY): missing fields, review state,
- * variant/photo spread. Decides the routing tier — nothing else in Demo Mode.
+ * The Messiness Score signal (GLOSSARY): missing fields, identity
+ * evidence, variant review state and photo spread. Decides the routing
+ * tier — nothing else in Demo Mode. Every input is stable under the enrich
+ * handler's own writes (it never mutates these), so a redelivered Job
+ * scores — and routes — identically (ADR-0003).
  */
 export function messinessScore(
   product: BatchProduct,
   variantCount: number,
+  variantNeedsReview: boolean,
   photoCount: number
 ): number {
   let score = 0
@@ -169,7 +173,7 @@ export function messinessScore(
   if (!product.category) score += 15
   if (!product.brand) score += 10
   if (!product.gtin) score += 10
-  if (product.needsReview) score += 15
+  if (variantNeedsReview) score += 15
   score += Math.min(variantCount, 4) * 2
   score += Math.min(photoCount, 3) * 2
   return Math.min(100, score)
@@ -190,10 +194,13 @@ async function enrichProduct(
   `)) as unknown as Array<{ row_index: number }>
 
   const variants = (await db.execute(sql`
-    SELECT attributes FROM variants
+    SELECT attributes, needs_review FROM variants
     WHERE product_id = ${product.id}
     ORDER BY variant_key
-  `)) as unknown as Array<{ attributes: Record<string, string> | null }>
+  `)) as unknown as Array<{
+    attributes: Record<string, string> | null
+    needs_review: boolean
+  }>
   // First value wins in variant_key order — deterministic merge.
   const attributes: Record<string, string> = {}
   for (const variant of variants) {
@@ -220,7 +227,12 @@ async function enrichProduct(
     },
     attributes,
     photoCount,
-    messiness: messinessScore(product, variants.length, photoCount),
+    messiness: messinessScore(
+      product,
+      variants.length,
+      variants.some((variant) => variant.needs_review),
+      photoCount
+    ),
     sourceRows: memberRows.map((row) => row.row_index),
   }
 

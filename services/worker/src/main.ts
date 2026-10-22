@@ -16,6 +16,15 @@ import { createGroupHandler } from "./group/handler"
 import { planGroupStage } from "./group/plan"
 import { createMatchMediaHandler } from "./media/handler"
 import { planMatchMediaStage } from "./media/plan"
+import { createEnrichHandler } from "./enrich/handler"
+import { createTranslateHandler } from "./translate/handler"
+import { createFinaliseHandler } from "./finalise/handler"
+import { planFinaliseStage } from "./finalise/plan"
+import {
+  createProviderRegistry,
+  createStubProvider,
+  type ProviderEntry,
+} from "./provider"
 import { defineHandlers } from "./handlers"
 import { requireEnv } from "./env"
 import { resolveCacheFromEnv, resolveStorageFromEnv } from "./storage"
@@ -29,11 +38,23 @@ const storage = resolveStorageFromEnv()
 const cache = resolveCacheFromEnv()
 
 /**
- * Pipeline surface through Ticket 4: intake, clean, the group Barrier (with
- * its deterministic enrich/translate fan-out at completion) and match-media.
- * Ticket 5 registers the enrich/translate HANDLERS; their Batches are
- * already planned by the barrier (ADR-0002).
+ * Demo Mode: the provider registry is occupied by the deterministic stub —
+ * zero API keys. Routing tiers are assigned per call from the Messiness
+ * Score, but Demo Mode treats tiers identically (spec: Provider handling);
+ * real providers register additional entries here without touching the
+ * handlers. Chaos flags arrive with Ticket 6's stub on the same port.
  */
+const STUB_CONCURRENCY = 4
+const providerEntries: ProviderEntry[] = [
+  {
+    provider: createStubProvider(),
+    concurrency: STUB_CONCURRENCY,
+    tiers: ["fast", "strong"],
+  },
+]
+const registry = createProviderRegistry(providerEntries)
+
+/** The full seven-Stage pipeline, one typed handler each. */
 const handlers = defineHandlers({
   intake: createIntakeHandler({
     storage,
@@ -43,6 +64,9 @@ const handlers = defineHandlers({
   clean: createCleanHandler(),
   group: createGroupHandler(),
   "match-media": createMatchMediaHandler(),
+  enrich: createEnrichHandler({ registry }),
+  translate: createTranslateHandler({ registry }),
+  finalise: createFinaliseHandler({ cache }),
 })
 
 const worker = createWorker({
@@ -53,6 +77,7 @@ const worker = createWorker({
     clean: planCleanStage,
     group: planGroupStage,
     "match-media": planMatchMediaStage,
+    finalise: planFinaliseStage,
   },
 })
 worker.start()

@@ -121,6 +121,9 @@ export async function completeIntake(
  *      Failed-with-reason and the dashboard offers retry.
  *   2. A clean-Stage Import with rows but zero clean Jobs gets its Jobs
  *      planned (crash-shape protection for the planner seam).
+ *   3. An Import sitting in `enrich` or `translate` with ZERO Jobs of that
+ *      Stage — the legitimate empty-Batch shape (nothing grouped, nothing
+ *      to enrich or translate) — advances; planning happens on entry.
  *
  * Only stages with a registered next-planner get planning; the stage value
  * always advances. Terminally-failed INTAKE work never advances (zero
@@ -134,16 +137,26 @@ export async function sweepStalledStageAdvances(
   const stalled = rowsOf<{ id: string; store_id: string; stage: string }>(
     await db.execute(sql`
       SELECT i.id, i.store_id, i.stage FROM imports i
-      WHERE i.status = 'running' AND i.stage IN ('intake', 'clean', 'group', 'match-media')
-        AND EXISTS (
-          SELECT 1 FROM jobs j
-          WHERE j.import_id = i.id AND j.stage = i.stage AND j.status = 'completed'
+      WHERE i.status = 'running' AND (
+        (
+          i.stage IN ('intake', 'clean', 'group', 'match-media', 'enrich', 'translate')
+          AND EXISTS (
+            SELECT 1 FROM jobs j
+            WHERE j.import_id = i.id AND j.stage = i.stage AND j.status = 'completed'
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM jobs j
+            WHERE j.import_id = i.id AND j.stage = i.stage
+              AND j.status IN ('pending', 'running')
+          )
+        ) OR (
+          i.stage IN ('enrich', 'translate')
+          AND NOT EXISTS (
+            SELECT 1 FROM jobs j
+            WHERE j.import_id = i.id AND j.stage = i.stage
+          )
         )
-        AND NOT EXISTS (
-          SELECT 1 FROM jobs j
-          WHERE j.import_id = i.id AND j.stage = i.stage
-            AND j.status IN ('pending', 'running')
-        )
+      )
     `)
   )
   const advanced: Array<{ importId: string; from: Stage; to: Stage }> = []

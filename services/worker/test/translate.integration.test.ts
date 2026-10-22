@@ -312,7 +312,8 @@ describe("translate Stage (de/fr, per Product × locale × field)", () => {
     // …while the English products each paid for two calls (de + fr).
     const calls = (await db.db.execute(sql`
       SELECT operation::text AS operation, provider_id, model, count(*)::int AS calls
-      FROM provider_usage WHERE import_id = ${imp.id}
+      FROM provider_usage
+      WHERE import_id = ${imp.id} AND operation = 'translate'
       GROUP BY operation, provider_id, model
     `)) as unknown as Array<{
       operation: string
@@ -325,7 +326,7 @@ describe("translate Stage (de/fr, per Product × locale × field)", () => {
         operation: "translate",
         provider_id: STUB_PROVIDER_ID,
         model: STUB_MODEL,
-        calls: 2, // tp-100 and tp-101; German-only product skipped
+        calls: 4, // tp-100 and tp-101 × de and fr; the German-only product skipped
       },
     ])
   })
