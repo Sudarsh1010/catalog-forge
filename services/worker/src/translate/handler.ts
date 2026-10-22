@@ -18,7 +18,6 @@ import { eq, sql } from "drizzle-orm"
 import type { Database } from "@workspace/db"
 import {
   imports,
-  productEnrichments,
   productTranslations,
   providerUsage,
 } from "@workspace/db/schema"

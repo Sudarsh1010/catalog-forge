@@ -177,9 +177,7 @@ async function ledgerRows(importId: string): Promise<LedgerRow[]> {
   `)) as unknown as LedgerRow[]
 }
 
-async function enrichJobs(
-  importId: string
-): Promise<
+async function enrichJobs(importId: string): Promise<
   Array<{
     id: string
     status: string
@@ -293,10 +291,6 @@ describe("poison Jobs: Failed-with-reason in the ledger, retryable", () => {
       RETURNING id
     `)) as unknown as Array<{ id: string }>
     const jobId = jobRow[0]!.id
-
-    const registry = createProviderRegistry([
-      { provider: createStubProvider(), concurrency: 2, tiers: ["fast"] },
-    ])
     const worker = createWorker({
       db,
       handlers: defineHandlers({
