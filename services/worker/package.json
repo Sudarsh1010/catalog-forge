@@ -15,6 +15,7 @@
     "resilience:e2e": "tsx scripts/resilience-e2e.ts"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^4.0.99",
     "@aws-sdk/client-s3": "^3.928.0",
     "@aws-sdk/lib-storage": "^3.928.0",
     "@workspace/cache": "workspace:*",
@@ -22,11 +23,13 @@
     "@workspace/log": "workspace:*",
     "@workspace/pipeline": "workspace:*",
     "@workspace/storage": "workspace:*",
+    "ai": "^7.0.148",
     "csv-parse": "^6.1.0",
     "drizzle-orm": "^0.45.4",
     "postgres": "^3.4.9",
     "saxes": "^6.0.0",
-    "yauzl": "^3.2.0"
+    "yauzl": "^3.2.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^20",

@@ -25,6 +25,7 @@ import { planFinaliseStage } from "./finalise/plan"
 import {
   createProviderRegistry,
   createStubProvider,
+  openAIProviderEntries,
   type ProviderEntry,
   type StubChaosOptions,
 } from "./provider"
@@ -42,18 +43,11 @@ const storage = resolveStorageFromEnv()
 const cache = resolveCacheFromEnv()
 
 /**
- * Demo Mode: the provider registry is occupied by the deterministic stub —
- * zero API keys. Routing tiers are assigned per Job at plan time from the
- * Messiness Score, but Demo Mode treats tiers identically (spec: Provider
- * handling); real providers register additional entries here without
- * touching the handlers.
- *
- * Chaos flags (Ticket 6) arrive via env — Demo Mode stays deterministic
- * with none set: STUB_CHAOS_FAILURE_RATE, STUB_CHAOS_RATE_LIMIT_AFTER,
- * STUB_CHAOS_RATE_LIMIT_FOR, STUB_CHAOS_RETRY_AFTER_MS,
- * STUB_CHAOS_INVALID_JSON_RATE, STUB_CHAOS_SEED.
+ * Chaos flags (Ticket 6) arrive via env and apply to the STUB only — Demo
+ * Mode stays deterministic with none set: STUB_CHAOS_FAILURE_RATE,
+ * STUB_CHAOS_RATE_LIMIT_AFTER, STUB_CHAOS_RATE_LIMIT_FOR,
+ * STUB_CHAOS_RETRY_AFTER_MS, STUB_CHAOS_INVALID_JSON_RATE, STUB_CHAOS_SEED.
  */
-const STUB_CONCURRENCY = envInt("WORKER_PROVIDER_CONCURRENCY", 4)
 const chaos: StubChaosOptions = {
   ...(process.env.STUB_CHAOS_SEED !== undefined
     ? { seed: envInt("STUB_CHAOS_SEED", 0) }
@@ -74,13 +68,32 @@ const chaos: StubChaosOptions = {
     ? { invalidJsonRate: envFloat("STUB_CHAOS_INVALID_JSON_RATE", 0) }
     : {}),
 }
-const providerEntries: ProviderEntry[] = [
-  {
-    provider: createStubProvider(chaos),
-    concurrency: STUB_CONCURRENCY,
-    tiers: ["fast", "strong"],
-  },
-]
+
+/**
+ * Provider selection is config (spec: Provider handling): OPENAI_API_KEY
+ * present → the real OpenAI provider serves both tiers (gpt-4o-mini for
+ * clean "fast" rows, gpt-4o for messy/photo "strong" rows, routed by the
+ * Messiness Score at plan time; both entries share the `openai` id so a
+ * Pause holds the provider across tiers). Absent → Demo Mode's
+ * deterministic stub serves both tiers — keyless CI stays green.
+ */
+const PROVIDER_CONCURRENCY = envInt("WORKER_PROVIDER_CONCURRENCY", 4)
+const providerEntries: ProviderEntry[] = process.env.OPENAI_API_KEY
+  ? openAIProviderEntries({
+      apiKey: process.env.OPENAI_API_KEY,
+      concurrency: PROVIDER_CONCURRENCY,
+      timeoutMs: envInt("OPENAI_TIMEOUT_MS", 60_000),
+      ...(process.env.OPENAI_BASE_URL !== undefined
+        ? { baseURL: process.env.OPENAI_BASE_URL }
+        : {}),
+    })
+  : [
+      {
+        provider: createStubProvider(chaos),
+        concurrency: PROVIDER_CONCURRENCY,
+        tiers: ["fast", "strong"],
+      },
+    ]
 const registry = createProviderRegistry(providerEntries)
 
 /** The full seven-Stage pipeline, one typed handler each. */

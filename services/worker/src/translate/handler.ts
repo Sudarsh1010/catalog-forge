@@ -30,7 +30,7 @@ import { healBatchRows } from "../poison"
 import {
   routingTierFor,
   routingTierFrom,
-  syntheticCostMicros,
+  costMicrosFor,
   type ProviderRegistry,
   type RoutingTier,
   type TranslateField,
@@ -234,7 +234,7 @@ async function translateProduct(
     model: call.usage.model,
     tokensIn: call.usage.tokensIn,
     tokensOut: call.usage.tokensOut,
-    costMicros: syntheticCostMicros(call.usage),
+    costMicros: costMicrosFor(call.usage),
   })
 }
 

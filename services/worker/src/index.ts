@@ -79,12 +79,20 @@ export {
   createStubProvider,
   routingTierFor,
   routingTierFrom,
-  syntheticCostMicros,
+  costMicrosFor,
   ProviderError,
   STUB_PROVIDER_ID,
   STUB_MODEL,
   REVIEW_CONFIDENCE_THRESHOLD,
 } from "./provider"
+export {
+  OPENAI_FAST_MODEL,
+  OPENAI_PROVIDER_ID,
+  OPENAI_STRONG_MODEL,
+  createOpenAIProvider,
+  openAIProviderEntries,
+} from "./provider"
+export type { OpenAIProviderOptions } from "./provider"
 export type {
   Provider,
   ProviderEntry,
