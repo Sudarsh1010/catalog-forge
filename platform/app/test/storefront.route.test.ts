@@ -49,11 +49,11 @@ async function seedImport(): Promise<string> {
   const id = crypto.randomUUID()
   await db.db.execute(sql`
     INSERT INTO imports (
-      id, store_id, content_hash, original_filename, sheet_format,
+      id, store_id, content_hash, family_key, original_filename, sheet_format,
       sheet_object_key, status, stage, sheet_header
     ) VALUES (
       ${id}, 'default', ${crypto.randomUUID().replaceAll("-", "")},
-      'supplier-sheet.csv', 'csv', 'imports/default/x/sheet.csv',
+      'supplier-sheet.csv', 'supplier-sheet.csv', 'csv', 'imports/default/x/sheet.csv',
       'completed', 'finalise', ${JSON.stringify(["SKU", "Title"])}::jsonb
     )
   `)
@@ -65,10 +65,10 @@ async function seedProduct(importId: string, title: string): Promise<string> {
   const naturalKey = `title:${title.toLowerCase()}`
   await db.db.execute(sql`
     INSERT INTO products (
-      id, store_id, import_id, identity_kind, natural_key,
+      id, store_id, import_id, family_key, identity_kind, natural_key,
       natural_key_hash, title, needs_review
     ) VALUES (
-      ${id}, 'default', ${importId}, 'title', ${naturalKey},
+      ${id}, 'default', ${importId}, 'supplier-sheet.csv', 'title', ${naturalKey},
       ${keyHash(naturalKey)}, ${title}, false
     )
   `)

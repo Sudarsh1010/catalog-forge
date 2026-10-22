@@ -116,6 +116,34 @@ export async function startTestApp(): Promise<TestApp> {
     path.dirname(fileURLToPath(import.meta.url)),
     ".."
   )
+  // `next dev` inspects ambient env markers (CLAUDECODE, CURSOR_TRACE_ID, …)
+  // to detect AI-agent sessions and then stops the server to present an
+  // interactive upgrade nudge — killing every later request in the suite.
+  // Strip the markers so the spawned server runs unattended; pinning CI also
+  // skips its boot-time advisory assessment (and any terminal prompt).
+  const env: NodeJS.ProcessEnv = { ...process.env, CI: "1" }
+  for (const marker of [
+    "AI_AGENT",
+    "ANTIGRAVITY_AGENT",
+    "AUGMENT_AGENT",
+    "CLAUDECODE",
+    "CLAUDE_CODE",
+    "CLAUDE_CODE_IS_COWORK",
+    "CODEX_CI",
+    "CODEX_SANDBOX",
+    "CODEX_THREAD_ID",
+    "COPILOT_ALLOW_ALL",
+    "COPILOT_GITHUB_TOKEN",
+    "COPILOT_MODEL",
+    "CURSOR_AGENT",
+    "CURSOR_EXTENSION_HOST_ROLE",
+    "CURSOR_TRACE_ID",
+    "GEMINI_CLI",
+    "OPENCODE_CLIENT",
+    "REPL_ID",
+  ]) {
+    delete env[marker]
+  }
   // Spawn the Next binary directly (not via pnpm) so SIGTERM reaches the
   // actual dev server instead of orphaning it.
   const nextBin = require.resolve("next/dist/bin/next", { paths: [appDir] })
@@ -125,7 +153,7 @@ export async function startTestApp(): Promise<TestApp> {
     {
       cwd: appDir,
       env: {
-        ...process.env,
+        ...env,
         NEXT_TELEMETRY_DISABLED: "1",
         DATABASE_URL: testDatabaseUrl(),
         REDIS_URL: TEST_REDIS_URL,
