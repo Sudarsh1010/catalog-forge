@@ -221,7 +221,9 @@ describe("poison Jobs: Failed-with-reason in the ledger, retryable", () => {
       await failing.stop()
     }
 
-    // Five attempts each, and the ledger carries the quarantine reason.
+    // Five attempts each; the ledger keeps its terminal verdicts — the
+    // rows are Done (grouped cleanly), and a poisoned Job never overwrites
+    // terminal Row Ledger states (done/needs_review reasons survive).
     const failed = await enrichJobs(importId)
     for (const job of failed) {
       expect(job.attempts).toBe(5)
@@ -230,8 +232,8 @@ describe("poison Jobs: Failed-with-reason in the ledger, retryable", () => {
     const quarantined = await ledgerRows(importId)
     expect(quarantined).toHaveLength(2)
     for (const row of quarantined) {
-      expect(row.state).toBe("failed")
-      expect(row.failure_reason).toContain("EC-122")
+      expect(row.state).toBe("done")
+      expect(row.failure_reason).toBeNull()
     }
     // The Import is NOT stranded mid-stage: it waits, retryable.
     const stalled = (await db.db.execute(sql`
@@ -345,4 +347,58 @@ describe("poison Jobs: Failed-with-reason in the ledger, retryable", () => {
       await worker.stop()
     }
   }, 20_000)
+
+  it("never overwrites terminal ledger rows (needs_review survives a poison)", async () => {
+    const imp = await seedImport(db, { status: "running", stage: "enrich" })
+    // One Product covering Batch products-000001-000001, with one ledger row
+    // already terminal Needs Review and one Done — a later Job failure must
+    // leave both verdicts (and the Needs Review reason) intact.
+    const productId = crypto.randomUUID()
+    await db.db.execute(sql`
+      INSERT INTO products (id, store_id, import_id, identity_kind, natural_key,
+                            natural_key_hash, title)
+      VALUES (${productId}, ${imp.storeId}, ${imp.id}, 'code', 'sku:t-1',
+              ${productId}, 'Test 1')
+    `)
+    for (const [rowIndex, state, reason] of [
+      [1, "needs_review", "Variant price conflicts across rows (EC-021)"],
+      [2, "done", null],
+    ] as Array<[number, string, string | null]>) {
+      await db.db.execute(sql`
+        INSERT INTO row_ledger (store_id, import_id, row_index, state, product_id, failure_reason)
+        VALUES (${imp.storeId}, ${imp.id}, ${rowIndex}, ${state}::row_ledger_state,
+                ${productId}, ${reason})
+      `)
+    }
+
+    const quarantined = await failBatchRows(
+      db.db,
+      {
+        storeId: imp.storeId,
+        importId: imp.id,
+        stage: "enrich",
+        batchKey: "products-000001-000001",
+        attempts: 5,
+      },
+      "provider gave up"
+    )
+    expect(quarantined).toBe(0) // nothing non-terminal to quarantine
+
+    const rows = (await db.db.execute(sql`
+      SELECT row_index, state::text AS state, failure_reason
+      FROM row_ledger WHERE import_id = ${imp.id} ORDER BY row_index
+    `)) as unknown as Array<{
+      row_index: number
+      state: string
+      failure_reason: string | null
+    }>
+    expect(rows).toEqual([
+      {
+        row_index: 1,
+        state: "needs_review",
+        failure_reason: "Variant price conflicts across rows (EC-021)",
+      },
+      { row_index: 2, state: "done", failure_reason: null },
+    ])
+  })
 })

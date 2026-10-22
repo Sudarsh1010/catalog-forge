@@ -229,6 +229,21 @@ async function main(): Promise<void> {
       `duplicate Products: ${products[0]!.n} rows vs ${products[0]!.distinct_keys} distinct natural keys`
     )
   }
+  // Name the duplicates, don't just count them away: GROUP BY the natural
+  // key so a regression reports exactly which keys collapsed.
+  const dupes = (await dbClient`
+    SELECT natural_key_hash, count(*)::int AS n
+    FROM products WHERE import_id = ${uploaded.id}
+    GROUP BY natural_key_hash HAVING count(*) > 1
+    LIMIT 10
+  `) as unknown as Array<{ natural_key_hash: string; n: number }>
+  if (dupes.length > 0) {
+    failures.push(
+      `duplicate natural keys (GROUP BY): ${dupes
+        .map((d) => `${d.natural_key_hash.slice(0, 12)}… ×${d.n}`)
+        .join(", ")}`
+    )
+  }
   if (failures.length > 0) {
     throw new Error(`e2e assertions failed:\n- ${failures.join("\n- ")}`)
   }

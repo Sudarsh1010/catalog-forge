@@ -10,7 +10,7 @@
 // re-running an already-running Job is a harmless no-op.
 import { index, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core"
 
-import { imports } from "./imports"
+import { pipelineStage, imports } from "./imports"
 
 export const reruns = pgTable(
   "reruns",
@@ -24,7 +24,7 @@ export const reruns = pgTable(
     /** The Stage to redo. Ticket scope: `enrich` (the pipeline's only
      *  merchant-facing re-run today); the column keeps the fact honest as
      *  further Stages grow one. */
-    stage: text("stage").notNull().default("enrich"),
+    stage: pipelineStage("stage").notNull().default("enrich"),
     /** The chosen Products; the Worker maps them onto their Batches. */
     productIds: uuid("product_ids").array().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })

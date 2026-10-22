@@ -16,17 +16,13 @@ import {
   uuid,
 } from "drizzle-orm/pg-core"
 
-export const importStatus = pgEnum("import_status", [
-  /** Written by the app, awaiting Sweeper adoption. */
-  "queued",
-  /** Adopted; the Stage machinery is in motion. */
-  "running",
-  /** Held back by a provider Pause; surfaced for the UI (spec: Pause). */
-  "paused",
-  "completed",
-  /** Terminal Failed with a merchant-fixable `failure_reason`. */
-  "failed",
-])
+import { IMPORT_STATUSES, PIPELINE_STAGES } from "@workspace/pipeline"
+
+/** The fixed seven-Stage machine (ADR-0002); the list lives in @workspace/pipeline. */
+export const pipelineStage = pgEnum("pipeline_stage", [...PIPELINE_STAGES])
+
+/** Import lifecycle statuses — single-sourced from @workspace/pipeline. */
+export const importStatus = pgEnum("import_status", [...IMPORT_STATUSES])
 
 export const imports = pgTable(
   "imports",
@@ -44,7 +40,7 @@ export const imports = pgTable(
     sheetObjectKey: text("sheet_object_key").notNull(),
     status: importStatus("status").notNull().default("queued"),
     /** Current pipeline Stage; the fixed order lives in @workspace/pipeline. */
-    stage: text("stage").notNull().default("intake"),
+    stage: pipelineStage("stage").notNull().default("intake"),
     /**
      * Header cells landed by intake. The header is not a Sheet Row — data
      * rows (1-based) live in `sheet_rows`, so ledger counts add up by

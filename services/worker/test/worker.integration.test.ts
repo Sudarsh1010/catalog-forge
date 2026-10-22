@@ -60,10 +60,10 @@ async function jobRows() {
 
 describe("worker claim/heartbeat/complete", () => {
   it("claims a seeded Job, heartbeats it, and completes it", async () => {
-    const jobId = await seedJob(db, { stage: "demo" })
+    const jobId = await seedJob(db)
     const worker = createWorker({
       db,
-      handlers: defineHandlers({ demo: async () => {} }),
+      handlers: defineHandlers({ enrich: async () => {} }),
       config: fastConfig("w-demo"),
     })
     worker.start()
@@ -87,7 +87,7 @@ describe("worker claim/heartbeat/complete", () => {
 
 describe("lease expiry and retries", () => {
   it("reclaims a Job whose Lease expired and re-runs it", async () => {
-    const jobId = await seedJob(db, { stage: "demo" })
+    const jobId = await seedJob(db)
 
     // Simulate a crashed worker: claim, then die without completing.
     const crashed = resolveConfig({ workerId: "w-crashed", leaseTtlMs: 60_000 })
@@ -105,7 +105,7 @@ describe("lease expiry and retries", () => {
     }
     const restarted = createWorker({
       db,
-      handlers: defineHandlers({ demo: handler }),
+      handlers: defineHandlers({ enrich: handler }),
       config: fastConfig("w-restarted"),
     })
     restarted.start()
@@ -126,12 +126,12 @@ describe("lease expiry and retries", () => {
     }
   })
 
-  it("terminates a poison Job as Failed after 5 attempts", async () => {
-    const jobId = await seedJob(db, { stage: "poison" })
+  it("terminates a failing Job as Failed after 5 attempts", async () => {
+    const jobId = await seedJob(db)
     const worker = createWorker({
       db,
       handlers: defineHandlers({
-        poison: async () => {
+        enrich: async () => {
           throw new Error("provider exploded")
         },
       }),
@@ -166,7 +166,7 @@ describe("racing claim loops", () => {
     `)
     const jobIds = new Set<string>()
     for (let i = 0; i < 25; i++) {
-      jobIds.add(await seedJob(db, { stage: "racy", batchKey: `batch-${i}` }))
+      jobIds.add(await seedJob(db, { batchKey: `batch-${i}` }))
     }
 
     const handler: JobHandler = async ({ job }) => {
@@ -180,12 +180,12 @@ describe("racing claim loops", () => {
     const workers = [
       createWorker({
         db,
-        handlers: defineHandlers({ racy: handler }),
+        handlers: defineHandlers({ enrich: handler }),
         config: fastConfig("w-race-a"),
       }),
       createWorker({
         db,
-        handlers: defineHandlers({ racy: handler }),
+        handlers: defineHandlers({ enrich: handler }),
         config: fastConfig("w-race-b"),
       }),
     ]
@@ -217,9 +217,7 @@ describe("restart", () => {
   it("restarting the worker loses zero pending work", async () => {
     const jobIds = new Set<string>()
     for (let i = 0; i < 10; i++) {
-      jobIds.add(
-        await seedJob(db, { stage: "restartable", batchKey: `batch-${i}` })
-      )
+      jobIds.add(await seedJob(db, { batchKey: `batch-${i}` }))
     }
 
     // First worker "crashes": every execution aborts mid-flight.
@@ -227,7 +225,7 @@ describe("restart", () => {
     const crashingWorker = createWorker({
       db,
       handlers: defineHandlers({
-        restartable: async () => {
+        enrich: async () => {
           await crashGate.promise
           throw new Error("worker died mid-job") // unreachable until gate opens
         },
@@ -257,7 +255,7 @@ describe("restart", () => {
     const restartedWorker = createWorker({
       db,
       handlers: defineHandlers({
-        restartable: async ({ job }) => {
+        enrich: async ({ job }) => {
           finishedByRestart.push(job.id)
         },
       }),

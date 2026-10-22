@@ -57,6 +57,13 @@
       "when": 1792656767529,
       "tag": "0007_needy_rafael_vega",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792661667546,
+      "tag": "0008_vengeful_risque",
+      "breakpoints": true
     }
   ]
 }

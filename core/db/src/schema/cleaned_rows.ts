@@ -60,10 +60,10 @@ export interface CleanedFlag {
 
 /**
  * The clean Stage's per-column decisions, computed once at plan time by a
- * deterministic scan of the raw rows (plan-then-execute, ADR-0002): chunk
+ * deterministic scan of the raw rows (plan-then-execute, ADR-0002): Batch
  * Jobs are independent and may run concurrently or out of order, so all
  * per-column inference (locale majority vote, currency, header hints) happens
- * up front and is stored — never re-derived per chunk.
+ * up front and is stored — never re-derived per Batch.
  */
 export interface CleanColumnPlan {
   /** 0-based column index; aligns with `sheet_header` / raw cell arrays. */
@@ -96,6 +96,8 @@ export const cleanPlans = pgTable("clean_plans", {
   importId: uuid("import_id")
     .primaryKey()
     .references(() => imports.id, { onDelete: "cascade" }),
+  /** Store isolation from day one (ADR-0006). */
+  storeId: text("store_id").notNull(),
   /** Per-column decisions, one entry per header column, in order. */
   columns: jsonb("columns").$type<CleanColumnPlan[]>().notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
@@ -136,9 +138,9 @@ export const cleanedRows = pgTable(
       .defaultNow(),
   },
   (t) => [
-    // Row identity + idempotent clean: re-running a chunk upserts, never appends.
+    // Row identity + idempotent clean: re-running a Batch upserts, never
+    // appends. (The unique index doubles as the import scan index — no twin.)
     uniqueIndex("cleaned_rows_identity_key").on(t.importId, t.rowIndex),
-    index("cleaned_rows_import_idx").on(t.importId, t.rowIndex),
     // Flags must be queryable (Messiness Score, Needs Review feeds).
     index("cleaned_rows_flags_idx").using("gin", t.flags),
   ]

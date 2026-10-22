@@ -263,7 +263,17 @@ export function createIntakeHandler(deps: IntakeDeps): JobHandler {
         )
       }
 
-      // 2. Advance the Stage machinery (idempotent guard: only the run that
+      // 2. Photos: hash loose uploads, extract and hash archive entries.
+      //    BEFORE the stage advances (Parked-Photo guarantee): once the
+      //    Import's stage leaves `intake`, the media stage may run — any
+      //    photo not yet hashed/extracted here could neither match a Product
+      //    nor park. Both steps are idempotent, so a requeued intake (e.g.
+      //    crash mid-extraction) converges: loose photos hash only when
+      //    `sha256` is null, archive entries upsert conflict-nothing.
+      await hashLoosePhotos(deps, db, imp)
+      await extractArchives(deps, db, imp, limits)
+
+      // 3. Advance the Stage machinery (idempotent guard: only the run that
       //    finds stage='intake' advances and publishes).
       const advancedTo = await completeIntake(
         db,
@@ -279,10 +289,6 @@ export function createIntakeHandler(deps: IntakeDeps): JobHandler {
           data: { importId: imp.id, from: "intake", to: advancedTo },
         })
       }
-
-      // 3. Photos: hash loose uploads, extract and hash archive entries.
-      await hashLoosePhotos(deps, db, imp)
-      await extractArchives(deps, db, imp, limits)
 
       log.info(`intake completed`, {
         importId: imp.id,

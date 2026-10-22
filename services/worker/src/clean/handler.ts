@@ -1,11 +1,11 @@
 /**
- * The `clean` Stage handler: one Job cleans one deterministic row chunk
+ * The `clean` Stage handler: one Job cleans one deterministic row Batch
  * (GLOSSARY: Batch) into the typed cleaned projection.
  *
  * Idempotent by construction (ADR-0003): results upsert on row identity
  * (import, row_index), so a redelivered Job converges — zero duplicates.
  * Stage advancement does not happen here: the Job machinery advances the
- * Import inside the completion transaction when the last chunk finishes.
+ * Import inside the completion transaction when the last Batch finishes.
  */
 import { and, asc, eq, gte, lte, sql } from "drizzle-orm"
 

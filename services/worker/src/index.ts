@@ -57,9 +57,6 @@ export { createMatchMediaHandler } from "./media/handler"
 export {
   MEDIA_BATCH_KEY,
   ENRICH_BATCH_SIZE,
-  enrichBatchKey,
-  translateBatchKey,
-  parseProductBatchKey,
   planMatchMediaStage,
 } from "./media/plan"
 export type { PlanMatchMediaOptions } from "./media/plan"
@@ -100,7 +97,13 @@ export type {
   TranslateResult,
   RoutingTier,
 } from "./provider"
-export { createEnrichHandler, messinessScore } from "./enrich/handler"
+export { createEnrichHandler } from "./enrich/handler"
+export {
+  messinessScore,
+  MESSINESS_WEIGHTS,
+  MESSINESS_MAX,
+  planTimeMessinessSql,
+} from "./messiness"
 export type { EnrichDeps } from "./enrich/handler"
 export { createTranslateHandler } from "./translate/handler"
 export type { TranslateDeps } from "./translate/handler"

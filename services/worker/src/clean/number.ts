@@ -202,10 +202,14 @@ export function scaledToCents(
   const head = intPart + fraction.padEnd(2, "0").slice(0, 2)
   if (head.length > 15) return null
   const tail = fraction.length > 2 ? fraction.slice(2) : ""
-  let cents = Number(head)
-  if (tail !== "" && tail[0]! >= "5") cents += 1
+  // BigInt digit math: no float ever materializes, even if the ≤15-digit
+  // guard above is ever relaxed. The final `Number` is exact — the guard
+  // keeps cents below 2^53.
+  let cents = BigInt(head)
+  if (tail !== "" && tail[0]! >= "5") cents += 1n
   if (tail !== "" && /[1-9]/.test(tail) && onRounded) onRounded(tail)
-  return scaled.negative ? -cents : cents
+  const centsNumber = Number(cents)
+  return scaled.negative ? -centsNumber : centsNumber
 }
 
 /** Round-half-up scaled-integer division via BigInt — exact, no floats. */
