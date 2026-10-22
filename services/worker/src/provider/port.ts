@@ -121,6 +121,8 @@ export interface TranslateResult {
 
 /** Synthetic per-call usage (spec: usage rows so cost has shape). */
 export interface ProviderUsage {
+  /** Which registered provider served the call. */
+  providerId: string
   model: string
   tokensIn: number
   tokensOut: number

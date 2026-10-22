@@ -301,7 +301,12 @@ function translateDeterministically(input: TranslateInput): TranslateResult {
 function usageOf(value: unknown, input: unknown): ProviderUsage {
   const tokensIn = Math.ceil(JSON.stringify(input).length / 4)
   const tokensOut = Math.ceil(JSON.stringify(value).length / 4)
-  return { model: STUB_MODEL, tokensIn, tokensOut }
+  return {
+    providerId: STUB_PROVIDER_ID,
+    model: STUB_MODEL,
+    tokensIn,
+    tokensOut,
+  }
 }
 
 /** The Demo Mode provider: deterministic, keyless, zero Claims. */

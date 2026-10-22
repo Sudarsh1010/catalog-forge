@@ -282,7 +282,12 @@ describe("provider registry", () => {
             reviewReasons: [],
             sourceRows: [],
           },
-          usage: { model: `${id}-model`, tokensIn: 1, tokensOut: 1 },
+          usage: {
+            providerId: id,
+            model: `${id}-model`,
+            tokensIn: 1,
+            tokensOut: 1,
+          },
         }
       },
       translate: async () => {
@@ -360,6 +365,7 @@ describe("failure classes (the port Ticket 6's chaos stub drives)", () => {
   it("prices a call deterministically from token counts", () => {
     expect(
       syntheticCostMicros({
+        providerId: "stub",
         model: "stub-demo-v1",
         tokensIn: 1_000,
         tokensOut: 2_000,
@@ -369,7 +375,12 @@ describe("failure classes (the port Ticket 6's chaos stub drives)", () => {
       50 + 400
     )
     expect(
-      syntheticCostMicros({ model: "stub-demo-v1", tokensIn: 0, tokensOut: 0 })
+      syntheticCostMicros({
+        providerId: "stub",
+        model: "stub-demo-v1",
+        tokensIn: 0,
+        tokensOut: 0,
+      })
     ).toBe(0)
   })
 })
