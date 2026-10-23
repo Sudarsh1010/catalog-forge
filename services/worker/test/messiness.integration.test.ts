@@ -1,11 +1,12 @@
 /**
  * Messiness Score agreement test — the SQL fragment the match-media planner
  * executes and the TS `messinessScore` the enrich handler records MUST
- * agree on the shared (non-photo) terms, because the plan-time score picks
- * the Batch's routing tier while the enrich-time score travels beside the
- * enrichment. Both read the same weights (`src/messiness.ts`); this test
- * pins the agreement against real Postgres so a drift in the fragment's
- * SQL shape still fails loudly.
+ * agree on the shared (non-photo) terms, because the plan-time score stamps
+ * the Job's routing_tier/provider_id (claim-gate/Pause metadata) while the
+ * enrich-time score picks each enrich/translate call's model tier and
+ * travels beside the enrichment. Both read the same weights
+ * (`src/messiness.ts`); this test pins the agreement against real Postgres
+ * so a drift in the fragment's SQL shape still fails loudly.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { sql } from "drizzle-orm"
@@ -24,7 +25,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await db.db.execute(
-    sql`TRUNCATE jobs, imports, sheet_rows, import_files, products, variants CASCADE`
+    sql`TRUNCATE translation_memory, jobs, imports, sheet_rows, import_files, products, variants CASCADE`
   )
 })
 
@@ -57,9 +58,12 @@ async function seedProduct(
 ): Promise<string> {
   const id = crypto.randomUUID()
   await db.db.execute(sql`
-    INSERT INTO products (id, store_id, import_id, identity_kind, natural_key,
-                          natural_key_hash, title, description, category, brand, gtin)
-    VALUES (${id}, 'default', ${importId}, ${options.identityKind ?? "code"},
+    INSERT INTO products (id, store_id, import_id, family_key, identity_kind,
+                          natural_key, natural_key_hash, title, description,
+                          category, brand, gtin)
+    VALUES (${id}, 'default', ${importId},
+            (SELECT family_key FROM imports WHERE id = ${importId}),
+            ${options.identityKind ?? "code"},
             ${"sku:" + id.slice(0, 8)}, ${id}, 'Test ' || ${id.slice(0, 8)},
             ${options.description ?? "desc"}, ${options.category ?? "cat"},
             ${options.brand ?? "brand"}, ${options.gtin ?? "12345678"})
@@ -79,10 +83,11 @@ describe("Messiness Score: SQL fragment and TS implementation agree", () => {
   it("scores plan-time products identically to messinessScore (photo-free)", async () => {
     const importId = crypto.randomUUID()
     await db.db.execute(sql`
-      INSERT INTO imports (id, store_id, content_hash, original_filename,
-                           sheet_format, sheet_object_key, status, stage)
+      INSERT INTO imports (id, store_id, content_hash, family_key,
+                           original_filename, sheet_format, sheet_object_key,
+                           status, stage)
       VALUES (${importId}, 'default', ${crypto.randomUUID()}, 'sheet.csv',
-              'csv', 'k', 'running', 'group')
+              'sheet.csv', 'csv', 'k', 'running', 'group')
     `)
     await seedProduct(importId, { identityKind: "title", brand: null })
     await seedProduct(importId, {

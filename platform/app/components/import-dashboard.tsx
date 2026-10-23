@@ -2,31 +2,35 @@
 
 /**
  * The import queue (ADR-0004 read-only dashboard state): every Import with
- * live stage status. Server state lives only in the query cache — the list
- * query feeds the queue, and each row subscribes to the shared Import
- * detail entry (seeded from the list row) that the SSE hook patches.
+ * live stage status. The queue hydrates from the server-rendered snapshot
+ * (`initialImports` seeds the list query, so the SSR HTML carries the
+ * rows and a broken browser link degrades to static content, never an
+ * empty shell); each row subscribes to the shared Import detail entry
+ * (seeded from its list row) that the SSE hook patches.
  */
 import { useQuery } from "@tanstack/react-query"
 import { PIPELINE_STAGES, type Stage } from "@workspace/pipeline"
-import type { ImportDto } from "@workspace/contracts"
+import type { ImportDto, ImportDetailDto } from "@workspace/contracts"
 import { Badge } from "@workspace/ui/components/badge"
 import { Card, CardContent } from "@workspace/ui/components/card"
 import { Alert, AlertDescription } from "@workspace/ui/components/alert"
-import { Skeleton } from "@workspace/ui/components/skeleton"
 import { cn } from "@workspace/ui/lib/utils"
 import Link from "next/link"
 
 import { orpc } from "@/lib/orpc"
 import { useImportEvents } from "@/hooks/use-import-events"
 import { STAGE_LABELS, STATUS_STYLES } from "./import-labels"
+import { DashboardNav } from "./dashboard-nav"
 import { UploadDropzone } from "./upload-dropzone"
 
 function LiveImport({ imported }: { imported: ImportDto }): React.ReactElement {
-  // One cache entry per import, shared with the detail page. Until the
-  // detail query resolves, the row renders the list row it came from.
-  const detailQuery = useQuery(
-    orpc.import.detail.queryOptions({ input: { id: imported.id } })
-  )
+  // One cache entry per import, shared with the detail page. The list row
+  // seeds the entry (the row only renders fields ImportDto carries) and
+  // the SSE hook patches it with full detail snapshots as they stream.
+  const detailQuery = useQuery({
+    ...orpc.import.detail.queryOptions({ input: { id: imported.id } }),
+    initialData: { import: imported as ImportDetailDto },
+  })
   const current = detailQuery.data?.import ?? imported
 
   // Terminal imports have nothing left to stream.
@@ -98,15 +102,23 @@ function LiveImport({ imported }: { imported: ImportDto }): React.ReactElement {
   )
 }
 
-export function ImportDashboard(): React.ReactElement {
-  const listQuery = useQuery(
-    orpc.import.list.queryOptions({ input: undefined })
-  )
-  const imports = listQuery.data?.imports
+export function ImportDashboard({
+  initialImports,
+}: {
+  initialImports: ImportDto[]
+}): React.ReactElement {
+  // The server-rendered queue seeds the query; the (fixed) browser link
+  // only refetches when something invalidates it — e.g. a fresh upload.
+  const listQuery = useQuery({
+    ...orpc.import.list.queryOptions({ input: undefined }),
+    initialData: { imports: initialImports },
+  })
+  const imports = listQuery.data?.imports ?? initialImports
 
   return (
     <div className="mx-auto flex min-h-svh w-full max-w-2xl flex-col gap-6 p-6">
       <header className="flex flex-col gap-1">
+        <DashboardNav active="/" />
         <h1 className="font-heading text-lg font-medium">Catalog imports</h1>
         <p className="text-sm text-muted-foreground">
           Drop a supplier sheet and its photos; processing runs in the
@@ -116,25 +128,19 @@ export function ImportDashboard(): React.ReactElement {
       <UploadDropzone />
       <section className="flex flex-col gap-2">
         <h2 className="text-sm font-medium">Queue</h2>
-        {listQuery.isPending ? (
-          <div className="flex flex-col gap-2" aria-busy="true">
-            <Skeleton className="h-20 w-full" />
-            <Skeleton className="h-20 w-full" />
-            <Skeleton className="h-20 w-full" />
-          </div>
-        ) : listQuery.isError ? (
+        {listQuery.isError && imports.length === 0 ? (
           <Alert variant="destructive" role="alert">
             <AlertDescription>
               The queue could not be loaded — try refreshing the page.
             </AlertDescription>
           </Alert>
-        ) : imports!.length === 0 ? (
+        ) : imports.length === 0 ? (
           <p className="border border-dashed border-border px-4 py-6 text-center text-xs text-muted-foreground">
             No imports yet — upload a sheet to get started.
           </p>
         ) : (
           <div className="flex flex-col gap-2">
-            {imports!.map((item) => (
+            {imports.map((item) => (
               <LiveImport key={item.id} imported={item} />
             ))}
           </div>

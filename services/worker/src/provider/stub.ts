@@ -8,6 +8,8 @@
  * provider fault, not corrupt data).
  */
 import {
+  REVIEW_CONFIDENCE_THRESHOLD,
+  slugifyHandle,
   ProviderError,
   type EnrichInput,
   type EnrichmentResult,
@@ -21,9 +23,6 @@ import {
 
 export const STUB_PROVIDER_ID = "stub"
 export const STUB_MODEL = "stub-demo-v1"
-
-/** Below this per-field Confidence the enrichment gates Needs Review (EC-099). */
-export const REVIEW_CONFIDENCE_THRESHOLD = 70
 
 /** Fixed Confidences for grounded fields; sparse products score lower. */
 const GROUNDED_CONFIDENCE: FieldConfidence = {
@@ -77,20 +76,6 @@ const LEXICON: Record<"de" | "fr", Record<string, string>> = {
 
 // ------------------------------------------------------------------ enrich --
 
-/** German-aware slug: ä/ö/ü/ß folded the way storefronts spell them. */
-function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .replaceAll("ä", "ae")
-    .replaceAll("ö", "oe")
-    .replaceAll("ü", "ue")
-    .replaceAll("ß", "ss")
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-}
-
 /** Tags: deduped source values in fixed order — nothing invented (EC-075). */
 function sourceTags(input: EnrichInput): string[] {
   const candidates = [
@@ -124,7 +109,7 @@ function enrichDeterministically(input: EnrichInput): EnrichmentResult {
   const title =
     carriesBrand || brand.length === 0 ? baseTitle : `${brand} ${baseTitle}`
 
-  const slug = slugify(title)
+  const slug = slugifyHandle(title)
   const handle = `${slug.length > 0 ? slug : "product"}-${product.naturalKeyHash.slice(0, 8)}`
 
   const hasSourceDescription =
@@ -411,7 +396,9 @@ export function createStubProvider(options?: StubChaosOptions): Provider {
     async enrich(input: EnrichInput): Promise<ProviderCall<EnrichmentResult>> {
       chaos.next()
       const value = enrichDeterministically(input)
-      return { value, usage: usageOf(value, input) }
+      // Photo bytes are vision context for real providers, not tokens Demo
+      // Mode prices — the synthetic estimate sees everything but the bytes.
+      return { value, usage: usageOf(value, { ...input, photos: undefined }) }
     },
     async translate(
       input: TranslateInput

@@ -58,7 +58,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await db.db.execute(
-    sql`TRUNCATE jobs, imports, sheet_rows, import_files, cleaned_rows, clean_plans CASCADE`
+    sql`TRUNCATE translation_memory, jobs, imports, sheet_rows, import_files, cleaned_rows, clean_plans CASCADE`
   )
 })
 
@@ -75,10 +75,12 @@ async function seedProduct(
   const id = crypto.randomUUID()
   await db.db.execute(sql`
     INSERT INTO products (
-      id, store_id, import_id, identity_kind, natural_key,
+      id, store_id, import_id, family_key, identity_kind, natural_key,
       natural_key_hash, title
     ) VALUES (
-      ${id}, 'test-store', ${importId}, 'code', ${naturalKey},
+      ${id}, 'test-store', ${importId},
+      (SELECT family_key FROM imports WHERE id = ${importId}),
+      'code', ${naturalKey},
       ${keyHash(naturalKey)}, ${naturalKey}
     )
   `)
@@ -89,11 +91,12 @@ async function seedEnrichJob(
   importId: string,
   batchKey: string,
   status: "completed" | "failed" | "pending",
-  attempts: number
+  attempts: number,
+  stage: string = "enrich"
 ): Promise<string> {
   const rows = (await db.db.execute(sql`
     INSERT INTO jobs (store_id, import_id, stage, batch_key, status, attempts, provider_id, routing_tier)
-    VALUES ('test-store', ${importId}, 'enrich', ${batchKey}, ${status}, ${attempts}, 'stub', 'fast')
+    VALUES ('test-store', ${importId}, ${stage}, ${batchKey}, ${status}, ${attempts}, 'stub', 'fast')
     RETURNING id
   `)) as unknown as Array<{ id: string }>
   return rows[0]!.id
@@ -102,11 +105,12 @@ async function seedEnrichJob(
 /** Write the fact exactly the way the dashboard's reruns route does. */
 async function seedRerunFact(
   importId: string,
-  productIds: string[]
+  productIds: string[],
+  stage: string = "enrich"
 ): Promise<string> {
   const rows = (await db.db.execute(sql`
     INSERT INTO reruns (store_id, import_id, stage, product_ids)
-    VALUES ('test-store', ${importId}, 'enrich', ARRAY[${sql.join(
+    VALUES ('test-store', ${importId}, ${stage}, ARRAY[${sql.join(
       productIds.map((id) => sql`${id}::uuid`),
       sql`, `
     )}]::uuid[])
@@ -227,6 +231,63 @@ describe("adoptReruns (sweeper adoption of Re-run facts)", () => {
     const translate = jobs.find((row) => row.stage === "translate")!
     expect(translate).toMatchObject({ status: "failed", attempts: 5 })
     expect(await jobRows(other.id)).toHaveLength(0) // other imports untouched
+  })
+
+  it("requeues the translate Jobs covering the chosen Products, including :locale batch keys", async () => {
+    const imp = await seedImport(db, { status: "completed", stage: "finalise" })
+    await seedProduct(imp.id, "sku:t-1")
+    await seedProduct(imp.id, "sku:t-2")
+    await seedProduct(imp.id, "sku:t-3")
+    const jobs = await Promise.all([
+      // Translate Batch keys carry the locale suffix (translateBatchKey).
+      seedEnrichJob(
+        imp.id,
+        "products-000001-000002:de",
+        "completed",
+        1,
+        "translate"
+      ),
+      seedEnrichJob(
+        imp.id,
+        "products-000001-000002:fr",
+        "completed",
+        1,
+        "translate"
+      ),
+      seedEnrichJob(
+        imp.id,
+        "products-000003-000003:de",
+        "completed",
+        2,
+        "translate"
+      ),
+    ])
+    const ordered = await productsInBatchOrder(imp.id)
+    // Re-run the translate stage for the two products of the FIRST batch.
+    await seedRerunFact(imp.id, [ordered[0]!, ordered[1]!], "translate")
+
+    const adopted = await adoptReruns(db.db)
+    expect(adopted).toHaveLength(1)
+    expect(adopted[0]!.stage).toBe("translate")
+    expect(adopted[0]!.requeuedJobIds).toHaveLength(2)
+    expect(adopted[0]!.requeuedJobIds).toContain(jobs[0]!)
+    expect(adopted[0]!.requeuedJobIds).toContain(jobs[1]!)
+
+    const after = await jobRows(imp.id)
+    const de = after.find(
+      (row) => row.batch_key === "products-000001-000002:de"
+    )!
+    expect(de).toMatchObject({ status: "pending", attempts: 0 })
+    const fr = after.find(
+      (row) => row.batch_key === "products-000001-000002:fr"
+    )!
+    expect(fr).toMatchObject({ status: "pending", attempts: 0 })
+    // The Batch covering the untouched product stays terminal.
+    const third = after.find(
+      (row) => row.batch_key === "products-000003-000003:de"
+    )!
+    expect(third).toMatchObject({ status: "completed", attempts: 2 })
+    expect(await rerunFacts(imp.id)).toHaveLength(0) // adopted = deleted
   })
 
   it("adopts a fact with no matching terminal Jobs as a harmless no-op", async () => {

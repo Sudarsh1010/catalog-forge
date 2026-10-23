@@ -39,8 +39,10 @@ export interface PlanMatchMediaOptions {
    * Resolves the provider serving a routing tier — Jobs are stamped with it
    * at plan time (spec: "routing tiers are assigned to Jobs at plan time via
    * the Messiness Score"), so the Pause claim gate holds exactly those Jobs.
-   * Omitted (tests of earlier tickets): Jobs stay provider-less and claim
-   * regardless of Pauses.
+   * The stamp is claim-gate/Pause metadata ONLY: the model tier for each
+   * enrich/translate call is chosen per row at call time, from the
+   * enrich-time photo-aware Messiness Score. Omitted (tests of earlier
+   * tickets): Jobs stay provider-less and claim regardless of Pauses.
    */
   providerForTier?: (tier: RoutingTier) => string
 }
@@ -70,8 +72,10 @@ export async function planMatchMediaStage(
     // Messiness Score is recomputed from the SHARED weights
     // (`src/messiness.ts`, the enrich handler's formula) minus photos —
     // media matching has not run yet, so the score finalizes at enrich
-    // time; the plan-time copy only picks the Batch's routing tier, which
-    // Demo Mode treats identically.
+    // time. The plan-time copy only stamps the Job's routing_tier and
+    // provider_id — claim-gate/Pause metadata (a Pause holds the Batch
+    // under its neediest tier's provider); the per-call model tier is
+    // chosen per row at enrich/translate time from the photo-aware score.
     const rows = (await tx.execute(sql`
       WITH scored AS (
         SELECT p.id, p.identity_kind, p.description, p.category, p.brand, p.gtin,
@@ -87,7 +91,9 @@ export async function planMatchMediaStage(
 
     for (let start = 1, ordinal = 0; ordinal < count; ordinal += batchSize) {
       const end = Math.min(start + batchSize - 1, count)
-      // The Batch's tier: its neediest product routes the whole Batch.
+      // The Batch's stamp: its neediest product's tier — what the Pause
+      // claim gate holds the whole Batch under. It never picks a model:
+      // each call's tier comes from its own row's enrich-time score.
       const tier = routingTierFor(
         Math.max(...rows.slice(start - 1, end).map((row) => row.messiness), 0)
       )

@@ -30,6 +30,7 @@ import {
   STUB_MODEL,
   STUB_PROVIDER_ID,
 } from "../src/index.js"
+import type { Provider } from "../src/provider/port.js"
 import { planCleanStage } from "../src/clean/plan.js"
 import { planGroupStage } from "../src/group/plan.js"
 import { planMatchMediaStage } from "../src/media/plan.js"
@@ -57,8 +58,9 @@ beforeAll(async () => {
 })
 
 beforeEach(async () => {
+  translateCalls = 0
   await db.db.execute(
-    sql`TRUNCATE jobs, imports, sheet_rows, import_files CASCADE`
+    sql`TRUNCATE translation_memory, jobs, imports, sheet_rows, import_files CASCADE`
   )
 })
 
@@ -81,8 +83,11 @@ const SHEET_HEADER = [
 const EN_DESCRIPTION =
   "Durable <strong>steel</strong> watering can, model TP-100-R: 5 l, " +
   "12,50 €, size XL, {{volume}} placeholder."
-// English corpus (source locale) + one German-only product: EC-088 says
-// translating German to German is a no-op that must not cost money.
+const DE_DESCRIPTION = "Robuste Gießkanne aus Stahlblech mit Messingring."
+// English corpus (source locale) + two German-only products: EC-088 says
+// translating German to German is a no-op that must not cost money, and
+// ticket #15 says the identical source text of the second one is served
+// from Translation Memory instead of re-paying the provider.
 const SHEET_ROWS = [
   [
     "TP-100-R",
@@ -119,7 +124,17 @@ const SHEET_ROWS = [
     "Gießkanne",
     "",
     "Garten > Bewässerung",
-    "Robuste Gießkanne aus Stahlblech mit Messingring.",
+    DE_DESCRIPTION,
+    "9,90",
+    "",
+    "",
+  ],
+  [
+    "GM-02",
+    "Gießkanne",
+    "",
+    "Garten > Bewässerung",
+    DE_DESCRIPTION,
     "9,90",
     "",
     "",
@@ -137,10 +152,26 @@ async function seedUpload(): Promise<{ id: string }> {
   return imp
 }
 
+/**
+ * Actual provider translate invocations. The EC-088 identity no-op writes no
+ * `provider_usage` row, so usage-row counts understate cost — this pins the
+ * real thing.
+ */
+let translateCalls = 0
+
 function providerRegistry() {
+  const stub = createStubProvider()
+  const counting: Provider = {
+    id: stub.id,
+    enrich: (input) => stub.enrich(input),
+    translate: (input) => {
+      translateCalls += 1
+      return stub.translate(input)
+    },
+  }
   return createProviderRegistry([
     {
-      provider: createStubProvider(),
+      provider: counting,
       concurrency: 4,
       tiers: ["fast", "strong"],
     },
@@ -291,23 +322,100 @@ describe("translate Stage (de/fr, per Product × locale × field)", () => {
     expect(deTitle.text).toContain("gießen")
   })
 
-  it("no-ops German source text at zero cost (EC-088)", async () => {
+  it("no-ops German source text at zero cost and seeds Translation Memory for identical source text (EC-088, ticket #15)", async () => {
     const imp = await seedUpload()
     await runThroughTranslate(imp.id)
 
     const ids = await productIdBySku()
-    const german = ids.get("gm-01")!
-    expect(german).toBeDefined()
+    const german1 = ids.get("gm-01")!
+    const german2 = ids.get("gm-02")!
+    expect(german1).toBeDefined()
+    expect(german2).toBeDefined()
 
-    // No translation rows for the German-only product…
+    // No translation rows for either German-only product…
     const rows = await translationRows()
-    expect(rows.filter((row) => row.product_id === german)).toEqual([])
+    expect(rows.filter((row) => row.product_id === german1)).toEqual([])
+    expect(rows.filter((row) => row.product_id === german2)).toEqual([])
     // …and no usage rows: the no-op never cost money.
     const usage = (await db.db.execute(sql`
       SELECT 1 FROM provider_usage
-      WHERE product_id = ${german} AND operation = 'translate' LIMIT 1
+      WHERE product_id IN (${german1}::uuid, ${german2}::uuid)
+        AND operation = 'translate' LIMIT 1
     `)) as unknown as unknown[]
     expect(usage).toHaveLength(0)
+
+    // The identical German source text is paid at most once (hash order
+    // decides which of the pair runs first): six translate calls in total —
+    // tp-100 and tp-101 × de and fr, plus one German product × de and fr.
+    // The twin is served from Translation Memory with zero provider calls.
+    expect(translateCalls).toBe(6)
+
+    // The identity no-op still cached its mapping: every German field's
+    // source hash maps to the unchanged text, for both locales — so the
+    // NEXT product with identical source text never re-pays (ticket #15).
+    const enriched = (await db.db.execute(sql`
+      SELECT title, description, category
+      FROM product_enrichments WHERE product_id = ${german1}
+    `)) as unknown as Array<{
+      title: string
+      description: string
+      category: string
+    }>
+    const { title, description, category } = enriched[0]!
+    const expected = (["de", "fr"] as const).flatMap((locale) =>
+      (
+        [
+          ["title", title],
+          ["description", description],
+          ["category", category],
+        ] as const
+      ).map(([field, text]) => ({
+        locale,
+        field,
+        source_text_hash: createHash("sha256")
+          .update(text, "utf8")
+          .digest("hex"),
+        text,
+      }))
+    )
+    const tm = (await db.db.execute(sql`
+      SELECT locale, field, source_text_hash, text
+      FROM translation_memory
+      ORDER BY locale, field
+    `)) as unknown as Array<{
+      locale: string
+      field: string
+      source_text_hash: string
+      text: string
+    }>
+    // The identity entries are exactly the German corpus, in both locales —
+    // six rows, shared by GM-01 and GM-02 (same source hashes, one entry
+    // each). The English entries carry real (non-identity) translations,
+    // exactly as before (c).
+    const germanTm = tm.filter((row) =>
+      expected.some((e) => e.source_text_hash === row.source_text_hash)
+    )
+    const byKey = (row: { locale: string; field: string }) =>
+      `${row.locale}/${row.field}`
+    expect(germanTm).toEqual(
+      [...expected].sort((a, b) => byKey(a).localeCompare(byKey(b)))
+    )
+
+    // A re-run of the same translate Jobs is fully memoized — current rows
+    // for the English products, identity TM hits for the German pair — and
+    // pays zero provider calls, without materializing translation rows for
+    // the identity no-ops.
+    const before = translateCalls
+    await db.db.execute(sql`
+      UPDATE jobs SET status = 'pending', attempts = 0, lease_owner = NULL,
+        lease_expires_at = NULL
+      WHERE import_id = ${imp.id} AND stage = 'translate'
+    `)
+    await runThroughTranslate(imp.id)
+    expect(translateCalls).toBe(before)
+    const after = await translationRows()
+    expect(after.filter((row) => row.product_id === german1)).toEqual([])
+    expect(after.filter((row) => row.product_id === german2)).toEqual([])
 
     // …while the English products each paid for two calls (de + fr).
     const calls = (await db.db.execute(sql`
@@ -326,7 +434,7 @@ describe("translate Stage (de/fr, per Product × locale × field)", () => {
         operation: "translate",
         provider_id: STUB_PROVIDER_ID,
         model: STUB_MODEL,
-        calls: 4, // tp-100 and tp-101 × de and fr; the German-only product skipped
+        calls: 4, // tp-100 and tp-101 × de and fr; the German pair never bills
       },
     ])
   })

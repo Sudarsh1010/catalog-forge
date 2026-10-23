@@ -1,0 +1,1 @@
+ALTER TABLE "product_enrichments" ADD COLUMN "field_origins" jsonb DEFAULT '{}'::jsonb NOT NULL;

@@ -72,10 +72,22 @@ export const productEnrichments = pgTable(
       .default({}),
     /** Per-field Confidence 0–100 (GLOSSARY: Confidence). */
     confidence: jsonb("confidence").$type<Record<string, number>>().notNull(),
+    /**
+     * Per-field Origin (GLOSSARY: Origin): who produced each enriched field.
+     * A `manual` field is the merchant's edit — a later enrich re-run keeps
+     * its value, confidence and origin and never lets AI output clobber it.
+     * Absent key = `ai`.
+     */
+    fieldOrigins: jsonb("field_origins")
+      .$type<Record<string, "ai" | "manual">>()
+      .notNull()
+      .default({}),
     status: enrichmentStatus("status").notNull(),
     /** Extracted assertions with source pointers; [] — the stub invents none. */
     claims: jsonb("claims")
-      .$type<Array<{ text: string; sourceRowIndex: number }>>()
+      .$type<
+        Array<{ text: string; sourceRowIndex: number; sourceColumn?: string }>
+      >()
       .notNull()
       .default([]),
     /** Why gating flagged the Product; empty when `ready`. */
@@ -180,6 +192,8 @@ export const providerUsage = pgTable(
     tokensOut: integer("tokens_out").notNull(),
     /** Synthetic cost in micro-currency units (1e-6) — never a float. */
     costMicros: integer("cost_micros").notNull(),
+    /** Wall-clock duration of the provider call, ms (Metrics speed view). */
+    durationMs: integer("duration_ms"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

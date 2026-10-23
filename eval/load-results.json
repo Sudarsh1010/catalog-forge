@@ -1,0 +1,69 @@
+{
+  "ticket": "21",
+  "generatedAt": "2026-10-22T17:28:29.563Z",
+  "config": {
+    "sheetRows": 10000,
+    "sheetSeed": 804496,
+    "seedProducts": 200,
+    "connections": 20,
+    "burstMs": 5000,
+    "p95BoundMs": 1250,
+    "spikeFactor": 5
+  },
+  "import": {
+    "id": "7c33bde1-853e-42f3-a175-3070363d0164",
+    "status": "completed",
+    "rows": 10000,
+    "elapsedMs": 294430,
+    "rowsPerMinute": 2038,
+    "uploadToAckMs": 73
+  },
+  "storefront": {
+    "collection": {
+      "baselineP95Ms": 475.3,
+      "worstWindowP95Ms": 676,
+      "medianWindowP95Ms": 599.7,
+      "meanWindowP95Ms": 588.3,
+      "windowP95sMs": [
+        465.7, 601.7, 612.3, 631, 596, 635, 637.7, 637.3, 636.3, 630.3, 601.7,
+        599.7, 623.7, 634.3, 592, 618, 596.7, 612.3, 452.7, 628.7, 618.7, 658,
+        463.7, 616, 447.3, 424.3, 603, 676, 598.3, 593, 580, 594, 472, 620.7,
+        592, 457.3, 601.3, 593, 620.7, 575.3, 626.3, 589.3, 567, 589.7, 629.3,
+        429.7, 597.7, 588.7, 590, 598, 626, 589.7, 567.3, 597.3, 614.7, 613, 670
+      ],
+      "requests": 12374,
+      "errors": 0,
+      "non2xx": 0
+    },
+    "product": {
+      "baselineP95Ms": 95.7,
+      "handlesSampled": 57,
+      "worstWindowP95Ms": 899.3,
+      "medianWindowP95Ms": 696,
+      "meanWindowP95Ms": 679.8,
+      "windowP95sMs": [
+        495.3, 696, 716, 731.3, 701, 838.3, 728, 798.3, 746.3, 726.7, 703.7,
+        691, 726.3, 725.7, 687, 726, 703, 690, 499, 721.7, 723.3, 739.7, 512,
+        687.3, 465.3, 478.3, 705, 799, 696, 683, 672, 666.3, 477, 705.3, 668.3,
+        524.3, 704.3, 681.7, 716.7, 667.3, 727.7, 680, 652.7, 680.3, 721.7,
+        463.7, 687.3, 687.7, 692.7, 682, 721.7, 676.3, 661, 688, 700.7, 700.7,
+        899.3
+      ],
+      "requests": 13251,
+      "errors": 0,
+      "non2xx": 0
+    }
+  },
+  "noAiCalls": {
+    "keylessEnv": "pass — app env carries zero AI provider credentials (Demo Mode), enforced before boot",
+    "appLogScan": "pass — 0 provider/enrich/translate lines in app output during the whole run",
+    "designGuarantee": "storefront reads Publications only (ADR-0005); every AI call lives behind the Worker's provider port — the only AI-capable process in this run is the Worker's stub"
+  },
+  "bounds": {
+    "p95WithinBound": true,
+    "noImportCoupledSpike": true,
+    "noRouteErrors": true,
+    "importCompleted": true
+  },
+  "pass": true
+}

@@ -3,26 +3,34 @@
  * the Import and collapses them into Products and Variants on scoped
  * Natural Keys — duplicated, split and out-of-order rows converge (EC-033,
  * EC-060, EC-061), identity is folded through NFC/invisible/case keys
- * (EC-034, EC-035), and the Natural Key is scoped to the Import so the same
- * supplier code from two sources stays two Products (EC-032).
+ * (EC-034, EC-035), and the Natural Key is scoped to the sheet family so
+ * the same supplier code from two sources stays two Products (EC-032).
+ *
+ * Re-import key-diff (ticket #14): a changed re-upload of a sheet family
+ * adopts its predecessor's catalog — unchanged rows are no-ops,
+ * price/weight-like changes patch the Variant via the Fast Path (no
+ * enrichment re-run), other changes update the Product, new rows append,
+ * and Variants absent from the new sheet become Missing-from-Source for
+ * the merchant to decide (never deleted).
  *
  * The Row Ledger links every Sheet Row to its Product or its failure reason
  * — the only source of "the counts add up" (GLOSSARY: Row Ledger).
  *
  * Idempotent by construction (ADR-0003): Products upsert on
- * (store, import, natural-key hash) — EC-068's database guarantee, racing
+ * (store, family, natural-key hash) — EC-068's database guarantee, racing
  * workers included — Variants on (product, variant-key hash), and ledger
  * rows on (import, row_index); a re-delivered barrier converges with zero
  * duplicates. Stage advancement and the enrich/translate fan-out happen in
  * the Job machinery's completion transaction, not here.
  */
-import { eq, sql } from "drizzle-orm"
+import { and, eq, inArray, sql } from "drizzle-orm"
 
 import type { Database } from "@workspace/db"
 import type { CleanColumnPlan, CleanedCell } from "@workspace/db/schema"
 import {
   cleanPlans,
   imports,
+  productEnrichments,
   products,
   rowLedger,
   variants,
@@ -30,6 +38,7 @@ import {
 import { createLogger } from "@workspace/log"
 
 import type { JobContext, JobHandler } from "../handlers"
+import { requeueCoveringProductJobs } from "../requeue"
 import { UnionFind, codeFamilyRelation, familyBase } from "./cluster"
 import { mapColumns, type ColumnRoles } from "./columns"
 import { identityKey, keyHash, normalizeGtin } from "./keys"
@@ -100,6 +109,7 @@ interface ProductDraft {
 interface ImportRecord {
   id: string
   storeId: string
+  familyKey: string
   status: string
 }
 
@@ -131,7 +141,7 @@ export function createGroupHandler(): JobHandler {
 
     const drafts = buildProductDrafts(rows)
     const { ledgerProductId, ledgerVariantId, reviewByRowIndex } =
-      await writeCatalog(db, imp.storeId, job.importId, drafts)
+      await writeCatalog(db, imp.storeId, imp.familyKey, job.importId, drafts)
 
     await writeLedger(
       db,
@@ -162,6 +172,7 @@ async function loadImport(
     .select({
       id: imports.id,
       storeId: imports.storeId,
+      familyKey: imports.familyKey,
       status: imports.status,
     })
     .from(imports)
@@ -544,15 +555,174 @@ interface CatalogWrites {
   reviewByRowIndex: Map<number, boolean>
 }
 
+/** The transaction handle every catalog write statement runs inside. */
+type CatalogTx = Parameters<Parameters<Database["transaction"]>[0]>[0]
+
+/** Whether every member of `subset` is also in `superset`. */
+function containsAll(subset: Set<string>, superset: Set<string>): boolean {
+  for (const value of subset) if (!superset.has(value)) return false
+  return true
+}
+
 /**
- * Upsert Products → Variants → return the id maps the ledger needs. All in
- * one transaction: a redelivered barrier either lands the whole catalog
- * update or none of it, and the unique indexes (EC-068) make concurrent
- * duplicates impossible regardless.
+ * The family's living catalog: every Product of the sheet family plus its
+ * Variants (GLOSSARY: Fast Path, Missing-from-Source). A re-import adopts
+ * these rows instead of appending duplicates — the unique index
+ * (store_id, family_key, natural_key_hash) backs the guarantee at the
+ * storage layer, so races converge on the same row no matter what.
+ */
+interface FamilyVariant {
+  id: string
+  variantKeyHash: string
+  sku: string | null
+  gtin: string | null
+  priceCents: number | null
+  priceCurrency: string | null
+  attributes: Record<string, string>
+  imageRef: string | null
+  missingFromSource: boolean
+  /** Sheet-owned (unlike the Product's sticky flag): see adoptProductDraft. */
+  needsReview: boolean
+  reviewReason: string | null
+}
+
+interface FamilyProduct {
+  id: string
+  /** The birth Import — translate re-runs requeue its Jobs (ticket #15). */
+  importId: string
+  naturalKeyHash: string
+  identityKind: "code" | "title"
+  naturalKey: string
+  title: string
+  brand: string | null
+  category: string | null
+  description: string | null
+  gtin: string | null
+  needsReview: boolean
+  reviewReason: string | null
+  variants: Map<string, FamilyVariant>
+}
+
+interface FamilyCatalog {
+  products: Map<string, FamilyProduct>
+}
+
+async function loadFamilyCatalog(
+  db: Database,
+  storeId: string,
+  familyKey: string
+): Promise<FamilyCatalog> {
+  const productRows = (await db.execute(sql`
+    SELECT id, import_id, natural_key_hash, identity_kind, natural_key,
+           title, brand, category, description, gtin, needs_review,
+           review_reason
+    FROM products
+    WHERE store_id = ${storeId} AND family_key = ${familyKey}
+  `)) as unknown as Array<{
+    id: string
+    import_id: string
+    natural_key_hash: string
+    identity_kind: "code" | "title"
+    natural_key: string
+    title: string
+    brand: string | null
+    category: string | null
+    description: string | null
+    gtin: string | null
+    needs_review: boolean
+    review_reason: string | null
+  }>
+  const products = new Map<string, FamilyProduct>()
+  const productsById = new Map<string, FamilyProduct>()
+  for (const row of productRows) {
+    const product: FamilyProduct = {
+      id: row.id,
+      importId: row.import_id,
+      naturalKeyHash: row.natural_key_hash,
+      identityKind: row.identity_kind,
+      naturalKey: row.natural_key,
+      title: row.title,
+      brand: row.brand,
+      category: row.category,
+      description: row.description,
+      gtin: row.gtin,
+      needsReview: row.needs_review,
+      reviewReason: row.review_reason,
+      variants: new Map(),
+    }
+    products.set(row.natural_key_hash, product)
+    productsById.set(row.id, product)
+  }
+  if (products.size === 0) return { products }
+  const variantRows = (await db.execute(sql`
+    SELECT v.id, v.product_id, v.variant_key_hash, v.sku, v.gtin,
+           v.price_cents, v.price_currency, v.attributes, v.image_ref,
+           v.missing_from_source, v.needs_review, v.review_reason
+    FROM variants v
+    WHERE v.store_id = ${storeId}
+      AND v.product_id IN (
+        SELECT id FROM products
+        WHERE store_id = ${storeId} AND family_key = ${familyKey}
+      )
+  `)) as unknown as Array<{
+    id: string
+    product_id: string
+    variant_key_hash: string
+    sku: string | null
+    gtin: string | null
+    price_cents: number | null
+    price_currency: string | null
+    attributes: Record<string, string>
+    image_ref: string | null
+    missing_from_source: boolean
+    needs_review: boolean
+    review_reason: string | null
+  }>
+  for (const row of variantRows) {
+    productsById.get(row.product_id)?.variants.set(row.variant_key_hash, {
+      id: row.id,
+      variantKeyHash: row.variant_key_hash,
+      sku: row.sku,
+      gtin: row.gtin,
+      priceCents: row.price_cents,
+      priceCurrency: row.price_currency,
+      attributes: row.attributes ?? {},
+      imageRef: row.image_ref,
+      missingFromSource: row.missing_from_source,
+      needsReview: row.needs_review,
+      reviewReason: row.review_reason,
+    })
+  }
+  return { products }
+}
+
+/**
+ * Upsert the catalog with re-import key-diff (ticket #14). Three shapes:
+ *
+ * 1. ADOPT — the Natural Key already exists in the family's catalog. The
+ *    existing Product/Variant rows are diffed against the new drafts:
+ *    unchanged rows are no-ops (no statement, no `updated_at` churn),
+ *    price/weight-like changes patch the Variant in place (Fast Path), other
+ *    changes update the Product row. Adopted rows KEEP their birth
+ *    `import_id`, which is what keeps them out of this Import's enrich and
+ *    translate Batches (both plan over `products.import_id = this Import`) —
+ *    the Fast Path costs no AI calls by construction. Variants of the family
+ *    catalog absent from the new sheet flip to Missing-from-Source and are
+ *    never deleted; ones that reappear clear the flag.
+ * 2. APPEND — a Natural Key the family never saw inserts a new Product
+ *    (birth `import_id` = this Import, so it is enriched and translated).
+ * 3. RACE — a concurrent barrier inserted the same key between the catalog
+ *    load and the insert; the family-scoped unique index upserts onto the
+ *    same row, so duplicates are impossible at the storage layer (EC-068).
+ *
+ * All in one transaction: a redelivered barrier either lands the whole
+ * catalog update or none of it, and re-delivery converges (diffs recompute
+ * to the same no-op set — ADR-0003).
  */
 async function writeCatalog(
   db: Database,
   storeId: string,
+  familyKey: string,
   importId: string,
   drafts: ProductDraft[]
 ): Promise<CatalogWrites> {
@@ -563,16 +733,77 @@ async function writeCatalog(
     return { ledgerProductId, ledgerVariantId, reviewByRowIndex }
   }
 
+  const family = await loadFamilyCatalog(db, storeId, familyKey)
+
+  /**
+   * Match drafts to the family catalog. Exact Natural Keys adopt directly.
+   * A draft whose key misses can still be the SAME Product with a shifted
+   * family base: the Natural Key of a code family is the cluster's common
+   * prefix, so dropping the last TP-100-G row renames `sku:tp-100` to
+   * `sku:tp-100-r`. Keying re-import on that volatile base would duplicate
+   * the Product instead of flagging the dropped Variant Missing-from-Source
+   * — so a draft also adopts an unclaimed family Product whose Variant set
+   * contains (or is contained in) the draft's, refining the Product's
+   * Natural Key to the draft's. Only a UNIQUE candidate adopts: two drafts
+   * claiming one Product is evidence of a split (EC-062 conservatism) and
+   * appends instead. Deterministic in (drafts, catalog), so a redelivered
+   * barrier recomputes the same adoption (ADR-0003).
+   */
+  const adoption = new Map<ProductDraft, FamilyProduct>()
+  const claimedProductIds = new Set<string>()
+  const unmatched: ProductDraft[] = []
+  for (const draft of drafts) {
+    const existing = family.products.get(draft.naturalKeyHash)
+    if (existing) {
+      adoption.set(draft, existing)
+      claimedProductIds.add(existing.id)
+    } else {
+      unmatched.push(draft)
+    }
+  }
+  unmatched.sort((a, b) => (a.naturalKey < b.naturalKey ? -1 : 1))
+  const refined = new Set<ProductDraft>()
+  for (const draft of unmatched) {
+    const draftVariantHashes = new Set(
+      draft.variants.map((variant) => keyHash(variant.variantKey))
+    )
+    const candidates = [...family.products.values()].filter((product) => {
+      if (claimedProductIds.has(product.id) || product.variants.size === 0)
+        return false
+      const productVariantHashes = new Set(product.variants.keys())
+      return (
+        containsAll(draftVariantHashes, productVariantHashes) ||
+        containsAll(productVariantHashes, draftVariantHashes)
+      )
+    })
+    if (candidates.length !== 1) continue
+    adoption.set(draft, candidates[0]!)
+    refined.add(draft)
+    claimedProductIds.add(candidates[0]!.id)
+  }
+  const fresh = unmatched.filter((draft) => !refined.has(draft))
+
   await db.transaction(async (tx) => {
+    for (const [draft, existing] of adoption) {
+      await adoptProductDraft(tx, storeId, importId, draft, existing, {
+        ledgerProductId,
+        ledgerVariantId,
+        reviewByRowIndex,
+      })
+    }
+
+    // Products the family never saw: plain insert (append). Upsert on the
+    // family-scoped key keeps a racing barrier from duplicating (shape 3).
     const productIdByHash = new Map<string, string>()
-    for (let index = 0; index < drafts.length; index += UPSERT_BATCH) {
-      const batch = drafts.slice(index, index + UPSERT_BATCH)
+    for (let index = 0; index < fresh.length; index += UPSERT_BATCH) {
+      const batch = fresh.slice(index, index + UPSERT_BATCH)
       const upserted = await tx
         .insert(products)
         .values(
           batch.map((draft) => ({
             storeId,
             importId,
+            familyKey,
             identityKind: draft.identityKind,
             naturalKey: draft.naturalKey,
             naturalKeyHash: draft.naturalKeyHash,
@@ -588,7 +819,7 @@ async function writeCatalog(
         .onConflictDoUpdate({
           target: [
             products.storeId,
-            products.importId,
+            products.familyKey,
             products.naturalKeyHash,
           ],
           set: {
@@ -612,14 +843,15 @@ async function writeCatalog(
         productIdByHash.set(row.naturalKeyHash, row.id)
     }
 
-    const variantIdByKey = new Map<string, string>()
-    const variantDrafts = drafts.flatMap((draft) =>
+    // Ledger ids for the appended Products and their Variants.
+    const variantDrafts = fresh.flatMap((draft) =>
       draft.variants.map((variant) => ({
         draft,
         variant,
         productId: productIdByHash.get(draft.naturalKeyHash)!,
       }))
     )
+    const variantIdByKey = new Map<string, string>()
     for (let index = 0; index < variantDrafts.length; index += UPSERT_BATCH) {
       const batch = variantDrafts.slice(index, index + UPSERT_BATCH)
       const upserted = await tx
@@ -654,6 +886,9 @@ async function writeCatalog(
             sourceRowIndex: sql`EXCLUDED.source_row_index`,
             needsReview: sql`EXCLUDED.needs_review`,
             reviewReason: sql`EXCLUDED.review_reason`,
+            // Present in this sheet again: not Missing-from-Source.
+            missingFromSource: sql`false`,
+            missingSince: sql`null`,
             updatedAt: new Date(),
           },
         })
@@ -666,38 +901,365 @@ async function writeCatalog(
         variantIdByKey.set(`${row.productId}:${row.variantKeyHash}`, row.id)
     }
 
-    // Row → Product/Variant resolution for the ledger write.
-    const variantKeyToId = new Map<string, string>()
-    for (const draft of drafts) {
+    for (const draft of fresh) {
       const productId = productIdByHash.get(draft.naturalKeyHash)!
       for (const variant of draft.variants) {
         const id = variantIdByKey.get(
           `${productId}:${keyHash(variant.variantKey)}`
         )
-        if (id) variantKeyToId.set(`${productId}|${variant.variantKey}`, id)
+        if (id)
+          variantKeyToLedger(draft, variant.variantKey, productId, id, {
+            ledgerProductId,
+            ledgerVariantId,
+            reviewByRowIndex,
+          })
       }
     }
-    for (const draft of drafts) {
-      const productId = productIdByHash.get(draft.naturalKeyHash)!
-      for (const member of draft.memberRows) {
-        const variantId = variantKeyToId.get(
-          `${productId}|${member.variantKey}`
+
+    // Variants of family Products this import never mentioned: absent from
+    // the latest sheet → Missing-from-Source (GLOSSARY). Never deleted; a
+    // later re-import that carries them again clears the flag.
+    const unclaimed = [...family.products.values()].filter(
+      (product) => !claimedProductIds.has(product.id)
+    )
+    for (let index = 0; index < unclaimed.length; index += UPSERT_BATCH) {
+      const batch = unclaimed.slice(index, index + UPSERT_BATCH)
+      await tx
+        .update(variants)
+        .set({
+          missingFromSource: true,
+          missingSince: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            inArray(
+              variants.productId,
+              batch.map((product) => product.id)
+            ),
+            eq(variants.missingFromSource, false)
+          )
         )
-        if (!variantId) continue
-        ledgerProductId.set(member.rowIndex, productId)
-        ledgerVariantId.set(member.rowIndex, variantId)
-        const variant = draft.variants.find(
-          (candidate) => candidate.variantKey === member.variantKey
-        )
-        reviewByRowIndex.set(
-          member.rowIndex,
-          draft.needsReview || (variant?.needsReview ?? false)
-        )
-      }
     }
   })
 
   return { ledgerProductId, ledgerVariantId, reviewByRowIndex }
+}
+
+/** Record one row's Product/Variant resolution for the ledger write. */
+function variantKeyToLedger(
+  draft: ProductDraft,
+  variantKey: string,
+  productId: string,
+  variantId: string,
+  writes: CatalogWrites
+): void {
+  for (const member of draft.memberRows) {
+    if (member.variantKey !== variantKey) continue
+    writes.ledgerProductId.set(member.rowIndex, productId)
+    writes.ledgerVariantId.set(member.rowIndex, variantId)
+    const variant = draft.variants.find(
+      (candidate) => candidate.variantKey === variantKey
+    )
+    writes.reviewByRowIndex.set(
+      member.rowIndex,
+      draft.needsReview || (variant?.needsReview ?? false)
+    )
+  }
+}
+
+/**
+ * Key-diff one draft against its adopted family Product (shape 1): patch
+ * what changed, flag what vanished, un-flag what reappeared, leave
+ * identical rows completely untouched. Appended Variants insert under the
+ * adopted Product.
+ */
+async function adoptProductDraft(
+  tx: CatalogTx,
+  storeId: string,
+  importId: string,
+  draft: ProductDraft,
+  existing: FamilyProduct,
+  writes: CatalogWrites
+): Promise<void> {
+  // Product fields: EXCLUDED semantics, but only when something actually
+  // changed — an unchanged re-upload issues no statement at all.
+  const productPatch: Record<string, unknown> = {}
+  if (existing.identityKind !== draft.identityKind)
+    productPatch.identityKind = draft.identityKind
+  // Differs only on refined adoption (variant set shifted the family base).
+  if (existing.naturalKeyHash !== draft.naturalKeyHash)
+    productPatch.naturalKeyHash = draft.naturalKeyHash
+  if (existing.naturalKey !== draft.naturalKey)
+    productPatch.naturalKey = draft.naturalKey
+  if (existing.title !== draft.title) productPatch.title = draft.title
+  if (existing.brand !== draft.brand) productPatch.brand = draft.brand
+  if (existing.category !== draft.category)
+    productPatch.category = draft.category
+  if (existing.description !== draft.description)
+    productPatch.description = draft.description
+  if (existing.gtin !== draft.gtin) productPatch.gtin = draft.gtin
+  // The Product's `needs_review` is a STICKY quality flag: enrichment's
+  // gateNeedsReview sets it post-enrichment and "gating never clears"
+  // (enrich/handler.ts, ADR-0003 convergence). Re-import therefore may only
+  // SET it from sheet evidence — never clear it, never overwrite a reason
+  // already recorded (even a low-confidence one) — so an unchanged
+  // re-upload preserves an enrichment-set flag instead of wiping it.
+  if (draft.needsReview && !existing.needsReview) {
+    productPatch.needsReview = true
+    productPatch.reviewReason = draft.reviewReason
+  }
+  if (Object.keys(productPatch).length > 0) {
+    await tx
+      .update(products)
+      .set({ ...productPatch, updatedAt: new Date() })
+      .where(eq(products.id, existing.id))
+  }
+
+  // English-text change on an adopted Product (ticket #15, GLOSSARY: Out of
+  // Date): the enrichment's English copy is synced (no AI — that would be a
+  // re-enrich), existing translations whose source hash no longer matches
+  // are flagged Out of Date (manual Origin rows kept, never overwritten),
+  // and the Product's AI translations re-run via its birth Import's
+  // covering translate Jobs.
+  const textPatch: Record<string, string> = {}
+  for (const field of ["title", "description", "category"] as const) {
+    const value = productPatch[field]
+    if (typeof value === "string") textPatch[field] = value
+  }
+  if (Object.keys(textPatch).length > 0) {
+    await flagTranslationsOutOfDate(tx, existing, textPatch)
+  }
+
+  const presentHashes = new Set<string>()
+  const appended: VariantDraft[] = []
+  for (const variant of draft.variants) {
+    const variantKeyHash = keyHash(variant.variantKey)
+    presentHashes.add(variantKeyHash)
+    const current = existing.variants.get(variantKeyHash)
+    if (!current) {
+      appended.push(variant)
+      continue
+    }
+
+    // Fast Path diff: price/weight-like fields (price) and supplier-fact
+    // fields patch in place; identical fields issue nothing.
+    const variantPatch: Record<string, unknown> = {}
+    if (current.sku !== variant.sku) variantPatch.sku = variant.sku
+    if (current.gtin !== variant.gtin) variantPatch.gtin = variant.gtin
+    if (current.priceCents !== variant.priceCents)
+      variantPatch.priceCents = variant.priceCents
+    if (current.priceCurrency !== variant.priceCurrency)
+      variantPatch.priceCurrency = variant.priceCurrency
+    if (current.imageRef !== variant.imageRef)
+      variantPatch.imageRef = variant.imageRef
+    if (
+      JSON.stringify(current.attributes) !== JSON.stringify(variant.attributes)
+    )
+      variantPatch.attributes = variant.attributes
+    // Variant `needs_review`/`review_reason` are SHEET-owned (unlike the
+    // Product's sticky flag): symmetric diff — set when this sheet's
+    // evidence flags a conflict (e.g. conflicting prices, EC-061), cleared
+    // when a later re-import's sheet resolves it.
+    if (current.needsReview !== variant.needsReview)
+      variantPatch.needsReview = variant.needsReview
+    if (current.reviewReason !== variant.reviewReason)
+      variantPatch.reviewReason = variant.reviewReason
+
+    if (Object.keys(variantPatch).length > 0) {
+      // The sheet that last contributed these values is this one.
+      await tx
+        .update(variants)
+        .set({
+          ...variantPatch,
+          sourceRowIndex: variant.sourceRowIndex,
+          importId,
+          updatedAt: new Date(),
+        })
+        .where(eq(variants.id, current.id))
+    }
+    if (current.missingFromSource) {
+      // Reappeared after being absent from an earlier re-import.
+      await tx
+        .update(variants)
+        .set({
+          missingFromSource: false,
+          missingSince: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(variants.id, current.id))
+    }
+    variantKeyToLedger(
+      draft,
+      variant.variantKey,
+      existing.id,
+      current.id,
+      writes
+    )
+  }
+
+  if (appended.length > 0) {
+    const upserted = await tx
+      .insert(variants)
+      .values(
+        appended.map((variant) => ({
+          storeId,
+          importId,
+          productId: existing.id,
+          variantKey: variant.variantKey,
+          variantKeyHash: keyHash(variant.variantKey),
+          sku: variant.sku,
+          gtin: variant.gtin,
+          priceCents: variant.priceCents,
+          priceCurrency: variant.priceCurrency,
+          attributes: variant.attributes,
+          imageRef: variant.imageRef,
+          sourceRowIndex: variant.sourceRowIndex,
+          needsReview: variant.needsReview,
+          reviewReason: variant.reviewReason,
+        }))
+      )
+      // A concurrent barrier may have appended the same Variant first —
+      // converge onto its row (ADR-0003).
+      .onConflictDoUpdate({
+        target: [variants.productId, variants.variantKeyHash],
+        set: {
+          sku: sql`EXCLUDED.sku`,
+          gtin: sql`EXCLUDED.gtin`,
+          priceCents: sql`EXCLUDED.price_cents`,
+          priceCurrency: sql`EXCLUDED.price_currency`,
+          attributes: sql`EXCLUDED.attributes`,
+          imageRef: sql`EXCLUDED.image_ref`,
+          sourceRowIndex: sql`EXCLUDED.source_row_index`,
+          needsReview: sql`EXCLUDED.needs_review`,
+          reviewReason: sql`EXCLUDED.review_reason`,
+          missingFromSource: sql`false`,
+          missingSince: sql`null`,
+          updatedAt: new Date(),
+        },
+      })
+      .returning({ id: variants.id, variantKeyHash: variants.variantKeyHash })
+    for (const row of upserted) {
+      const variant = appended.find(
+        (candidate) => keyHash(candidate.variantKey) === row.variantKeyHash
+      )
+      if (variant)
+        variantKeyToLedger(
+          draft,
+          variant.variantKey,
+          existing.id,
+          row.id,
+          writes
+        )
+    }
+  }
+
+  // Variants of this Product the new sheet no longer carries.
+  const absentHashes = [...existing.variants.keys()].filter(
+    (hash) => !presentHashes.has(hash)
+  )
+  if (absentHashes.length > 0) {
+    await tx
+      .update(variants)
+      .set({
+        missingFromSource: true,
+        missingSince: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(variants.productId, existing.id),
+          inArray(variants.variantKeyHash, absentHashes),
+          eq(variants.missingFromSource, false)
+        )
+      )
+  }
+}
+
+/**
+ * Out-of-Date tracking for an adopted Product whose English text changed
+ * (ticket #15, GLOSSARY: Out of Date, Origin):
+ *
+ *   1. The enrichment's English copy is synced to the re-imported text —
+ *      a field patch, not a re-enrichment: no provider call, no usage row,
+ *      confidence/claims untouched. The translate Stage reads this copy as
+ *      its source text, so the re-run translates the NEW English.
+ *   2. Every translation of a CHANGED field is flagged `out_of_date` —
+ *      deliberately conservative: the enrichment's English is a
+ *      provider-formed copy, so the barrier cannot recompute the exact
+ *      hash a translation must pin. Manual-Origin rows are kept verbatim —
+ *      a translate upsert can never overwrite them (the
+ *      `origin <> 'manual'` guard) — the flag is the merchant's signal.
+ *      Over-flagging self-heals: the translate Stage clears the flag on
+ *      any row whose hash still matches the live source text.
+ *   3. AI re-runs happen for this Product only: the terminal translate
+ *      Jobs of the Product's birth Import whose deterministic Batch covers
+ *      it are requeued with reset attempts when AI work exists to redo.
+ *      Unchanged Products in those Batches cost nothing (their
+ *      translations still pin the current source hash — the translate
+ *      handler skips them; Translation Memory absorbs anything else that
+ *      was seen before).
+ */
+async function flagTranslationsOutOfDate(
+  tx: CatalogTx,
+  existing: FamilyProduct,
+  textPatch: Record<string, string>
+): Promise<void> {
+  await tx
+    .update(productEnrichments)
+    .set({ ...textPatch, updatedAt: new Date() })
+    .where(eq(productEnrichments.productId, existing.id))
+
+  const changedFields = Object.keys(textPatch)
+  await tx.execute(sql`
+    UPDATE product_translations
+    SET out_of_date = true, updated_at = now()
+    WHERE product_id = ${existing.id}::uuid
+      AND field IN (${sql.join(
+        changedFields.map((field) => sql`${field}`),
+        sql`, `
+      )})
+      AND NOT out_of_date
+  `)
+
+  const hasStaleAi = (await tx.execute(sql`
+    SELECT EXISTS (
+      SELECT 1 FROM product_translations
+      WHERE product_id = ${existing.id}::uuid
+        AND origin = 'ai'
+        AND field IN (${sql.join(
+          changedFields.map((field) => sql`${field}`),
+          sql`, `
+        )})
+    ) AS stale_ai
+  `)) as unknown as Array<{ stale_ai: boolean }>
+  const anyTranslations = (await tx.execute(sql`
+    SELECT EXISTS (
+      SELECT 1 FROM product_translations
+      WHERE product_id = ${existing.id}::uuid
+    ) AS any_rows
+  `)) as unknown as Array<{ any_rows: boolean }>
+  // A Product with no translation rows at all gets the same re-run chance:
+  // EC-088 no-ops (translation equal to source) write no row, so "no rows"
+  // is not proof the new text needs nothing.
+  if (!hasStaleAi[0]?.stale_ai && anyTranslations[0]?.any_rows) return
+
+  // The translate Jobs of the Product's deterministic Batch requeue via
+  // the shared helper (the same path the Sweeper uses for Re-run facts,
+  // ADR-0004) with reset attempts when AI work exists to redo.
+  const requeuedJobIds = await requeueCoveringProductJobs(
+    tx,
+    existing.importId,
+    "translate",
+    [existing.id]
+  )
+  if (requeuedJobIds.length > 0) {
+    log.info(`requeued translate jobs for out-of-date product`, {
+      productId: existing.id,
+      importId: existing.importId,
+      jobIds: requeuedJobIds,
+    })
+  }
 }
 
 /**
