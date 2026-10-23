@@ -70,9 +70,11 @@ storefront — runs keyless and reproducibly. Nothing else to configure.
 ### Real AI (optional)
 
 Uncomment `OPENAI_API_KEY` in `platform/app/.env.local` (worker only). The
-worker then routes enrich/translate through two-tier OpenAI: **gpt-4o-mini**
-for clean rows (Fast Path), **gpt-4o** for messy/photo-heavy rows. The Next.js
-app never sees the key — the worker is the only AI-capable process.
+worker then routes enrich/translate through two-tier OpenAI, decided per row
+at enrich time from the photo-aware Messiness Score: **gpt-4o-mini** for
+clean rows, **gpt-4o** for messy/photo rows — and the strong tier receives
+the row's actual photo image content, not just a note that photos exist. The
+Next.js app never sees the key — the worker is the only AI-capable process.
 
 ```bash
 OPENAI_API_KEY=sk-… pnpm dev
@@ -85,7 +87,10 @@ pnpm dev
 # Dashboard:  http://localhost:3000/  → upload eval/supplier-sheet.csv
 #             (121 deliberately messy rows: duplicates, split rows, mixed
 #              currencies/units/locales, typos, HTML, no-SKU rows, GTIN
-#              corruption, phantom photos — see eval/RESULTS.md)
+#             corruption, phantom photos — see eval/RESULTS.md)
+# Products:   http://localhost:3000/products — review, edit, bulk Approve
+#              or bulk Send back; interactions are server-driven (URL state
+#              + server actions)
 # Storefront: http://localhost:3000/storefront
 ```
 
@@ -94,14 +99,14 @@ pnpm dev
 Captured from a Demo Mode run over the committed Eval Set sheet
 (`eval/supplier-sheet.csv`, 121 rows → 42 products):
 
-| What | Where | Screenshot |
-| --- | --- | --- |
-| Dashboard — pipeline detail | `/imports/[id]` | ![import-detail](docs/screenshots/dashboard-import-detail.png) |
-| Storefront collection (German) | `/storefront?country=DE` | ![storefront](docs/screenshots/storefront-collection.png) |
-| Storefront product (German) | `/storefront/[handle]?country=DE` | ![storefront-product](docs/screenshots/storefront-product.png) |
+| What                           | Where                             | Screenshot                                                     |
+| ------------------------------ | --------------------------------- | -------------------------------------------------------------- |
+| Dashboard — pipeline detail    | `/imports/[id]`                   | ![import-detail](docs/screenshots/dashboard-import-detail.png) |
+| Storefront collection (German) | `/storefront?country=DE`          | ![storefront](docs/screenshots/storefront-collection.png)      |
+| Storefront product (German)    | `/storefront/[handle]?country=DE` | ![storefront-product](docs/screenshots/storefront-product.png) |
 
-The import-list and needs-review views are pending a client-query fix —
-see Known issues in `docs/WRITEUP.md`.
+The import-list and `/products` views are server-rendered (URL state +
+server actions); `/products` supports bulk Approve and bulk Send back.
 
 ## Tech stack
 
@@ -125,9 +130,15 @@ see Known issues in `docs/WRITEUP.md`.
   so re-runs patch instead of duplicating. Missing-from-Source variants are
   never deleted automatically — the merchant decides.
 - **Fast Path re-imports.** When only price/weight-like fields changed, the
-  change is patched and no AI enrichment re-runs.
-- **Messiness Score routes the model.** Score ≥ 50 → gpt-4o (strong tier);
-  below → gpt-4o-mini (Fast tier). Routing is stamped on the Job at plan time.
+  change is patched and no AI enrichment re-runs; an unchanged re-upload is
+  a true no-op (no `updated_at` churn). Needs-Review is sticky on Products
+  (re-import can only set it, never clear it); a Variant's Needs-Review flag
+  is sheet-owned — a conflicting price flags it, a resolving sheet clears it.
+- **Messiness Score routes the model, per row.** At enrich time each row's
+  photo-aware Messiness Score picks the tier: gpt-4o (strong tier, fed the
+  actual photo image content) for messy/photo rows; gpt-4o-mini (Fast tier,
+  text-only) otherwise. The plan-time Job stamp is only the Pause claim
+  gate.
 - **Confidence gates review.** Enrichment below 70 confidence flags Needs
   Review — the same gate for the stub and the real provider.
 - **Enrichment is grounded.** Tags and Claims must trace to the product's
@@ -157,12 +168,13 @@ see Known issues in `docs/WRITEUP.md`.
 Three levers, in order of impact:
 
 1. **Two-tier routing.** Most rows are clean; gpt-4o-mini handles them
-   (150 µ$/1k in, 600 µ$/1k out). Only high-Messiness rows escalate to gpt-4o
-   (2,500/10,000 µ$/1k). The tier is decided from the Messiness Score before
-   any call is made.
+   (150 µ$/1k in, 600 µ$/1k out). Each row's photo-aware Messiness Score,
+   evaluated at enrich time, escalates messy/photo rows to gpt-4o
+   (2,500/10,000 µ$/1k) — and the strong tier gets the real photo content.
 2. **Translation memory (TM) cache.** Translation calls key on
    `sha256(source text)` per `(store, locale, field)`; identical strings
-   across products and re-imports cost zero (`src/translate/handler.ts`).
+   across products and re-imports cost zero, and identity no-ops are cached
+   too (`src/translate/handler.ts`).
 3. **Fast Path.** Price/weight-only re-imports skip enrichment entirely.
 
 **Cost per 1,000 products (estimated, no live keyed run exists yet).** Real
@@ -175,8 +187,8 @@ cost per 1,000 products ≈ 1,000 × (tokensIn × priceIn + tokensOut × priceOu
 
 For a representative enrich call of ~1k input / ~300 output tokens through
 gpt-4o-mini that is ≈ **$0.33 per 1,000 products** (estimated). Escalating
-~20 % of rows to gpt-4o raises it to ≈ **$7 per 1,000** (estimated); the
-routing threshold is what keeps that share small. Numbers marked *estimated*
+~20 % of rows to gpt-4o raises it to ≈ **$7 per 1,000** (estimated); per-row
+routing is what keeps that share small. Numbers marked _estimated_
 are derived from MODEL_PRICES + assumed token counts, not from a recorded run.
 
 ## Eval

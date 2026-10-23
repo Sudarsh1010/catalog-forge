@@ -27,9 +27,10 @@ not here.
   the merchant decides its fate.
 - **Fast Path** — The re-import route where only price/weight-like fields
   changed: the change is patched and no enrichment re-runs.
-- **Re-run** — A merchant's request to redo a Stage's work for chosen Products
-  (e.g. enrichment with different settings). Recorded as a fact the Worker
-  adopts, exactly like an Import.
+- **Re-run** — A merchant's request to redo a Stage's work for chosen
+  Products (e.g. enrichment with different settings, or Send back from the
+  Products tab). Recorded as a `reruns` fact — one fact per Import can carry
+  all chosen ids — that the Worker's sweeper adopts, exactly like an Import.
 
 ## Pipeline
 
@@ -47,7 +48,10 @@ not here.
   Batches of the next Stage.
 - **Messiness Score** — A per-Product signal computed during cleaning and
   grouping (missing fields, conflicting rows, damaged text, attached photos)
-  that decides how strong a model enrichment needs.
+  that decides how strong a model enrichment needs. Evaluated per row at
+  enrich time (photo-aware): clean rows go to the fast tier, messy/photo
+  rows to the strong tier, which also receives the row's actual photo image
+  content.
 
 ## Execution
 
@@ -70,8 +74,12 @@ not here.
 ## Review & publication
 
 - **Needs Review** — Terminal quality state meaning "a human must decide,"
-  always with a reason. Applies to Products; a Sheet Row whose Product needs
-  review mirrors that state in the Row Ledger.
+  always with a reason. A Product's Needs-Review flag is **sticky**: a
+  re-import can set it but never clear it — only a merchant resolves it. A
+  Variant's flag is sheet-owned: a conflicting price (or enrichment
+  confidence) sets it, and a later sheet that resolves the conflict clears
+  it. A Sheet Row whose Product needs review mirrors that state in the Row
+  Ledger.
 - **Claim** — An assertion extracted from source text (e.g. "frost-resistant").
   Always carries a pointer to the exact source it came from; never invented.
 - **Confidence** — Per-field score (0–100) from enrichment; low scores force
@@ -83,7 +91,6 @@ not here.
   Origin always wins over later AI output.
 - **Out of Date** — A translation whose English source changed after it was
   made. Kept and flagged; never silently overwritten.
-
 
 ## Evaluation
 
