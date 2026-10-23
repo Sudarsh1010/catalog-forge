@@ -84,6 +84,20 @@ not here.
 - **Out of Date** — A translation whose English source changed after it was
   made. Kept and flagged; never silently overwritten.
 
+
+## Evaluation
+
+- **Eval Set** — A committed, deliberately messy supplier sheet paired with
+  Gold Labels. Doubles as the demo sample; separate from the synthetic
+  generator.
+- **Gold Label** — The hand-verified expected outcome for one Product of the
+  Eval Set (grouping, variants, price cents, claims, review status).
+- **Layer 1 Score** — Exact-match accuracy over deterministic pipeline outputs
+  (grouping, dedupe, prices, units, photo matching). Runs keyless in CI.
+- **Layer 2 Score** — Accuracy over AI-enriched fields (title, category,
+  claims) on a sample of the Eval Set; graded loosely because valid outputs
+  vary. Only meaningful with a real provider.
+
 ## Boundaries
 
 - **Store** — The isolation boundary for all merchant data. One UI and one

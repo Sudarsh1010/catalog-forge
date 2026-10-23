@@ -1,6 +1,6 @@
 {
   "id": "9db6c7c9-9ee6-47cd-b5a7-c5350371a4c7",
-  "prevId": "da5320ae-3060-45d8-952f-98b0e44e4331",
+  "prevId": "1d24424f-03c7-4693-8c5c-a7529dfd235f",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1950,6 +1950,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "field_origins": {
+          "name": "field_origins",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
         }
       },
       "indexes": {
@@ -2553,6 +2560,13 @@
         },
         "created_at": {
           "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,

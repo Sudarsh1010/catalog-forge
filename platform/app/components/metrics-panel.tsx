@@ -338,6 +338,53 @@ function CoverageTable({
   )
 }
 
+function MissingFromSourceCard({
+  rows,
+}: {
+  rows: MetricsOverviewDto["missingFromSource"]
+}) {
+  const total = rows.reduce((sum, row) => sum + row.missingVariants, 0)
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm">Missing from source</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {total === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            No variants lost on re-import.
+          </p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-xs">Store</TableHead>
+                <TableHead className="text-right text-xs">
+                  Missing variants
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((row) => (
+                <TableRow key={row.storeId}>
+                  <TableCell className="text-xs font-medium">
+                    {row.storeId}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Badge variant="outline" className="text-[10px]">
+                      {row.missingVariants.toLocaleString()}
+                    </Badge>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 function SavingsTable({
   rows,
 }: {
@@ -443,6 +490,7 @@ export function MetricsPanel(): React.ReactElement {
       <div className="grid gap-4 md:grid-cols-2">
         <CoverageTable rows={overview.translationCoverage} />
         <SavingsTable rows={overview.routingSavings} />
+        <MissingFromSourceCard rows={overview.missingFromSource} />
       </div>
     </div>
   )

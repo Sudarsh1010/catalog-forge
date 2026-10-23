@@ -17,6 +17,7 @@ import { CountrySwitcher } from "@/components/country-switcher"
 import {
   listPublishedProducts,
   resolveLocale,
+  searchParam,
   type StoreLocale,
 } from "@/lib/storefront"
 
@@ -43,7 +44,7 @@ export default async function StorefrontCollectionPage({
   searchParams,
 }: PageProps<"/storefront">) {
   const { country: rawCountry } = await searchParams
-  const country = Array.isArray(rawCountry) ? rawCountry[0] : rawCountry
+  const country = searchParam(rawCountry)
   const locale = resolveLocale(country)
   const products = await listPublishedProducts(locale)
 

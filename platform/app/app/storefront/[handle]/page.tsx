@@ -26,6 +26,7 @@ import { CountrySwitcher } from "@/components/country-switcher"
 import {
   getPublishedProduct,
   resolveLocale,
+  searchParam,
   type StoreLocale,
 } from "@/lib/storefront"
 import { presignDownload } from "@/lib/storage"
@@ -53,7 +54,7 @@ export default async function StorefrontProductPage({
 }: PageProps<"/storefront/[handle]">) {
   const { handle } = await params
   const { country: rawCountry } = await searchParams
-  const country = Array.isArray(rawCountry) ? rawCountry[0] : rawCountry
+  const country = searchParam(rawCountry)
   const locale = resolveLocale(country)
   const product = await getPublishedProduct(handle, locale)
 

@@ -262,6 +262,8 @@ export const ProductVariantSchema = z.object({
   sourceRowIndex: z.number(),
   needsReview: z.boolean(),
   reviewReason: z.string().nullable(),
+  /** True when a re-import no longer contains this Variant's source row. */
+  missingFromSource: z.boolean(),
 })
 export type ProductVariantDto = z.infer<typeof ProductVariantSchema>
 
@@ -425,6 +427,15 @@ export const MetricsSavingsRowSchema = z.object({
 })
 export type MetricsSavingsRowDto = z.infer<typeof MetricsSavingsRowSchema>
 
+/** Variants a re-import dropped, per store (view: metrics_missing_from_source). */
+export const MetricsMissingFromSourceRowSchema = z.object({
+  storeId: z.string(),
+  missingVariants: z.number(),
+})
+export type MetricsMissingFromSourceRowDto = z.infer<
+  typeof MetricsMissingFromSourceRowSchema
+>
+
 /** The full Metrics-tab payload — one view per block. */
 export const MetricsOverviewSchema = z.object({
   rates: MetricsRatesSchema,
@@ -433,5 +444,6 @@ export const MetricsOverviewSchema = z.object({
   speed: z.array(MetricsSpeedRowSchema),
   translationCoverage: z.array(MetricsCoverageRowSchema),
   routingSavings: z.array(MetricsSavingsRowSchema),
+  missingFromSource: z.array(MetricsMissingFromSourceRowSchema),
 })
 export type MetricsOverviewDto = z.infer<typeof MetricsOverviewSchema>

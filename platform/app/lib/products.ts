@@ -363,10 +363,12 @@ export async function loadProductDetail(
     source_row_index: number
     needs_review: boolean
     review_reason: string | null
+    missing_from_source: boolean
   }>(
     await db.execute(sql`
       SELECT id, sku, gtin, price_cents, price_currency, attributes,
-             image_ref, source_row_index, needs_review, review_reason
+             image_ref, source_row_index, needs_review, review_reason,
+             missing_from_source
       FROM variants WHERE product_id = ${id}
       ORDER BY variant_key
     `)
@@ -460,6 +462,7 @@ export async function loadProductDetail(
       sourceRowIndex: variant.source_row_index,
       needsReview: variant.needs_review,
       reviewReason: variant.review_reason,
+      missingFromSource: variant.missing_from_source,
     })),
     photos: photoRows.map((photo) => ({
       fileId: photo.file_id,
@@ -562,6 +565,94 @@ export async function editProduct(
       updated_at = now()
     WHERE product_id = ${id}
   `)
+
+  // Out-of-Date tracking (ticket #15, GLOSSARY: Out of Date) — the same
+  // behaviour the worker's flagTranslationsOutOfDate applies when a
+  // re-import changes the English: the translate Stage reads the
+  // enrichment's English as its source text, so every translation of a
+  // CHANGED text field is flagged (conservatively — over-flagging
+  // self-heals on the next translate run), and the translate Jobs of the
+  // Product's deterministic Batch are requeued so AI work actually redoes
+  // the translation. Manual-Origin rows keep their text; the flag is the
+  // merchant's signal.
+  const ENGLISH_TEXT_FIELDS = ["title", "description", "category"]
+  const changedTextFields = edited
+    .map(([field]) => field)
+    .filter((field) => ENGLISH_TEXT_FIELDS.includes(field))
+  if (changedTextFields.length > 0) {
+    await db.execute(sql`
+      UPDATE product_translations
+      SET out_of_date = true, updated_at = now()
+      WHERE product_id = ${id}::uuid
+        AND field IN (${sql.join(
+          changedTextFields.map((field) => sql`${field}`),
+          sql`, `
+        )})
+        AND NOT out_of_date
+    `)
+
+    const flags = rowsOf<{ stale_ai: boolean; any_rows: boolean }>(
+      await db.execute(sql`
+        SELECT
+          EXISTS (
+            SELECT 1 FROM product_translations
+            WHERE product_id = ${id}::uuid AND origin = 'ai'
+              AND field IN (${sql.join(
+                changedTextFields.map((field) => sql`${field}`),
+                sql`, `
+              )})
+          ) AS stale_ai,
+          EXISTS (
+            SELECT 1 FROM product_translations
+            WHERE product_id = ${id}::uuid
+          ) AS any_rows
+      `)
+    )
+    // A Product with no translation rows at all gets the same re-run
+    // chance: EC-088 no-ops write no row, so "no rows" is not proof the
+    // new text needs nothing.
+    if (!flags[0]?.stale_ai && flags[0]?.any_rows) {
+      const product = await loadProductDetail(db, id)
+      return product !== null
+        ? { ok: true, product }
+        : { ok: false, reason: "not_found" }
+    }
+
+    const ordinal = rowsOf<{ ordinal: number }>(
+      await db.execute(sql`
+        SELECT ordinal FROM (
+          SELECT id, ROW_NUMBER() OVER (ORDER BY natural_key_hash) AS ordinal
+          FROM products WHERE import_id = (
+            SELECT import_id FROM products WHERE id = ${id}
+          )
+        ) ranked
+        WHERE ranked.id = ${id}
+      `)
+    )
+    const position = ordinal[0]?.ordinal
+    if (position) {
+      await db.execute(sql`
+        UPDATE jobs SET
+          status = 'pending',
+          attempts = 0,
+          lease_owner = NULL,
+          lease_expires_at = NULL,
+          available_at = NULL,
+          updated_at = now()
+        WHERE import_id = (SELECT import_id FROM products WHERE id = ${id})
+          AND stage = 'translate'
+          AND status IN ('completed', 'failed')
+          AND batch_key ~ '^products-[0-9]{6}-[0-9]{6}'
+          AND (regexp_match(
+                batch_key, '^products-([0-9]{6})-([0-9]{6})'
+              ))[1]::int <= ${position}
+          AND (regexp_match(
+                batch_key, '^products-([0-9]{6})-([0-9]{6})'
+              ))[2]::int >= ${position}
+      `)
+    }
+  }
+
   const product = await loadProductDetail(db, id)
   return product !== null
     ? { ok: true, product }
@@ -580,6 +671,11 @@ export async function editProduct(
  * One set-based statement so bulk approval costs the same as single;
  * returns the Product ids that got Publications (those with an enrichment).
  * Callers run it inside their transaction.
+ *
+ * Out-of-Date translations never enter a Publication (GLOSSARY: Out of
+ * Date): a flagged row is stale English-source text, so the snapshot falls
+ * back to the enrichment's English until the translate Stage clears the
+ * flag; the flag itself stays the merchant's signal.
  */
 export async function writePublications(
   db: SqlExecutor,
@@ -603,15 +699,15 @@ export async function writePublications(
       CROSS JOIN (VALUES ('en'), ('de'), ('fr')) AS loc(locale)
       LEFT JOIN LATERAL (
         SELECT
-          (SELECT pt.text FROM product_translations pt
-           WHERE pt.product_id = e.product_id AND pt.locale = loc.locale
-             AND pt.field = 'title') AS title,
-          (SELECT pt.text FROM product_translations pt
-           WHERE pt.product_id = e.product_id AND pt.locale = loc.locale
-             AND pt.field = 'description') AS description,
-          (SELECT pt.text FROM product_translations pt
-           WHERE pt.product_id = e.product_id AND pt.locale = loc.locale
-             AND pt.field = 'category') AS category
+        (SELECT pt.text FROM product_translations pt
+         WHERE pt.product_id = e.product_id AND pt.locale = loc.locale
+           AND pt.field = 'title' AND NOT pt.out_of_date) AS title,
+        (SELECT pt.text FROM product_translations pt
+         WHERE pt.product_id = e.product_id AND pt.locale = loc.locale
+           AND pt.field = 'description' AND NOT pt.out_of_date) AS description,
+        (SELECT pt.text FROM product_translations pt
+         WHERE pt.product_id = e.product_id AND pt.locale = loc.locale
+           AND pt.field = 'category' AND NOT pt.out_of_date) AS category
       ) t ON TRUE
       LEFT JOIN LATERAL (
         SELECT v.price_cents, v.price_currency FROM variants v

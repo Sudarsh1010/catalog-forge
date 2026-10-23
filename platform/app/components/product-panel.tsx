@@ -329,6 +329,14 @@ export function ProductPanel({
                     <tr key={variant.id} className="border-b border-border/50">
                       <td className="py-1 pr-2 font-mono">
                         {variant.sku ?? "—"}
+                        {variant.missingFromSource ? (
+                          <Badge
+                            variant="outline"
+                            className="ml-1 align-middle text-[9px] text-amber-700 dark:text-amber-400"
+                          >
+                            missing from source
+                          </Badge>
+                        ) : null}
                       </td>
                       <td className="py-1 pr-2 font-mono">
                         {variant.gtin ?? "—"}

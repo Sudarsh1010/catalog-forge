@@ -838,6 +838,18 @@ describe("product.detail (the side-by-side hydration)", () => {
       "PRICED-1-G",
       "PRICED-1-R",
     ])
+    // Missing-from-Source rides in the DTO (review finding): the red
+    // variant's source row vanished on a re-import, the green one is fine.
+    await db.db.execute(sql`
+      UPDATE variants SET missing_from_source = true
+      WHERE product_id = ${priced} AND sku = 'PRICED-1-R'
+    `)
+    const refetched = await client.product.detail({ id: priced })
+    const bySku = new Map(
+      refetched.product.variants.map((variant) => [variant.sku, variant])
+    )
+    expect(bySku.get("PRICED-1-R")!.missingFromSource).toBe(true)
+    expect(bySku.get("PRICED-1-G")!.missingFromSource).toBe(false)
     expect(product.photos).toHaveLength(1)
     expect(product.photos[0]!.objectKey).toContain("priced-1.jpg")
     expect(product.photos[0]!.matchedVia).toBe("sku")
@@ -943,6 +955,78 @@ describe("product.edit (merchant Origin)", () => {
       tags: "manual",
       attributes: "manual",
     })
+  })
+
+  it("flags affected translations Out of Date when English text fields change", async () => {
+    // `priced` carries de/fr translations (seedCatalog); the merchant
+    // rewrites the English title — the de/fr title translations keep their
+    // text but must be flagged, and the untouched description must not be.
+    const { priced } = await seedCatalog()
+    const result = await client.product.edit({
+      id: priced,
+      fields: { title: "Gießkanne 5L, handbeschriftet" },
+    })
+    const translations = result.product.translations
+    const byField = (locale: string, field: string) =>
+      translations.find((row) => row.locale === locale && row.field === field)!
+    // Changed field's translations: text kept, flag set.
+    expect(byField("de", "title")).toMatchObject({
+      text: "Brunner Gießkanne 5 Liter",
+      origin: "ai",
+      outOfDate: true,
+    })
+    expect(byField("fr", "title")!.outOfDate).toBe(true)
+    // Untouched fields stay current.
+    expect(byField("de", "description")).toMatchObject({
+      text: "Robuste Gießkanne.",
+      outOfDate: false,
+    })
+    // Structured edits flag nothing.
+    await seedTranslation(priced, "de", "category", "Garten")
+    const structured = await client.product.edit({
+      id: priced,
+      fields: { tags: ["garden", "watering"] },
+    })
+    expect(
+      structured.product.translations.find(
+        (row) => row.locale === "de" && row.field === "category"
+      )!.outOfDate
+    ).toBe(false)
+  })
+
+  it("never serves an Out-of-Date translation as current in a refreshed Publication", async () => {
+    const { priced } = await seedCatalog()
+    await client.product.approve({ id: priced })
+    // The edit flags the stale translations; because the Product is
+    // published, the snapshot refreshes in the same transaction and the
+    // flagged rows must fall back to the (edited) English.
+    const edited = await client.product.edit({
+      id: priced,
+      fields: { title: "Gießkanne 5L, handbeschriftet" },
+    })
+    expect(edited.product.publication).not.toBeNull()
+
+    const rows = (await db.db.execute(sql`
+      SELECT locale, title, description FROM publications
+      WHERE product_id = ${priced} ORDER BY locale
+    `)) as unknown as Array<{
+      locale: string
+      title: string
+      description: string
+    }>
+    const de = rows.find((row) => row.locale === "de")!
+    const fr = rows.find((row) => row.locale === "fr")!
+    // Out-of-Date de/fr titles fall back to the edited English; the
+    // untouched description translation still serves.
+    expect(de.title).toBe("Gießkanne 5L, handbeschriftet")
+    expect(fr.title).toBe("Gießkanne 5L, handbeschriftet")
+    expect(de.description).toBe("Robuste Gießkanne.")
+    // The flags stay — the translate Stage clears them, not the edit.
+    const flags = (await db.db.execute(sql`
+      SELECT locale, field, out_of_date FROM product_translations
+      WHERE product_id = ${priced} AND field = 'title' ORDER BY locale
+    `)) as unknown as Array<{ locale: string; out_of_date: boolean }>
+    expect(flags.every((row) => row.out_of_date)).toBe(true)
   })
 
   it("rejects unknown products, un-enriched products and empty edits", async () => {

@@ -10,6 +10,7 @@ import { sql } from "drizzle-orm"
 import type {
   MetricsCoverageRowDto,
   MetricsCostDayDto,
+  MetricsMissingFromSourceRowDto,
   MetricsModelUsageRowDto,
   MetricsOverviewDto,
   MetricsRatesDto,
@@ -116,6 +117,15 @@ export async function loadMetricsOverview(
     ORDER BY saved_micros DESC, model, provider_id, operation
   `)) as unknown as SavingsRow[]
 
+  const missingRows = (await db.execute(sql`
+    SELECT store_id, missing_variants
+    FROM metrics_missing_from_source
+    ORDER BY missing_variants DESC, store_id
+  `)) as unknown as Array<{
+    store_id: string
+    missing_variants: number | string
+  }>
+
   // Rates aggregate across imports; the percentages recompute over the
   // summed ledger states so they stay an exact partition of totalRows.
   const totalRows = num(ratesRows[0]?.total_rows ?? 0)
@@ -186,6 +196,13 @@ export async function loadMetricsOverview(
     savedMicros: num(row.saved_micros),
   }))
 
+  const missingFromSource: MetricsMissingFromSourceRowDto[] = missingRows.map(
+    (row) => ({
+      storeId: row.store_id,
+      missingVariants: num(row.missing_variants),
+    })
+  )
+
   return {
     rates,
     modelUsage,
@@ -193,5 +210,6 @@ export async function loadMetricsOverview(
     speed,
     translationCoverage,
     routingSavings,
+    missingFromSource,
   }
 }

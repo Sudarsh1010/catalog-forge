@@ -57,3 +57,11 @@ app↔worker boundary.
   transitional.
 - Deleting `platform/admin` removes a build/deploy target; admin work now
   ships with the main app's release cadence.
+
+## Addendum (2026-10-23, spec-11 product surface)
+
+The route-handler exception list now also covers binary downloads and
+streams: catalog export (`GET /api/products/export/[format]` for CSV/JSON)
+and the photo stream (`GET /api/photos/[fileId]`) are plain Next.js route
+handlers — octet streams and file downloads are the same class of
+response-stream surface as upload and SSE, not request/response RPC.

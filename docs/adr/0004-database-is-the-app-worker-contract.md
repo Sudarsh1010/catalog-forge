@@ -24,3 +24,13 @@ approvals; the worker writes jobs / ledger / enrichment.
 
 - Read-only SQL across the boundary is accepted at this scale; if the app ever
   needs stronger isolation, views or a replica — not HTTP — are the next step.
+
+## Addendum (2026-10-23, spec-11 product surface)
+
+The ownership line "the worker writes enrichment" is no longer exclusive:
+the merchant edit path (`editProduct` in `platform/app/lib/products.ts`)
+writes merchant field edits into `product_enrichments` (`field_origins =
+manual`, confidence 100, review reasons answered) and flags affected
+translations Out of Date, mirroring the worker's re-import patch behaviour.
+The worker still owns the AI enrichment pipeline; the app now also owns
+human edits to its output.

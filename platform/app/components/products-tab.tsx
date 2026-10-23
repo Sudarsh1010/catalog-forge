@@ -170,12 +170,12 @@ export function ProductsTab(): React.ReactElement {
   // The export download carries the tab's active search/filters (not the
   // page): the endpoints serve exactly the filtered catalog, in the
   // table's current sort order.
-  const exportHref = useMemo(() => {
+  const exportQuery = useMemo(() => {
     const params = new URLSearchParams({ sort, dir })
     if (search.length > 0) params.set("search", search)
     if (status !== "all") params.set("status", status)
     if (confidence !== "all") params.set("confidence", confidence)
-    return `/api/products/export?${params.toString()}`
+    return params.toString()
   }, [search, status, confidence, sort, dir])
 
   return (
@@ -246,14 +246,14 @@ export function ProductsTab(): React.ReactElement {
         </Button>
         <a
           className={buttonVariants({ variant: "outline", size: "xs" })}
-          href={`${exportHref}/csv`}
+          href={`/api/products/export/csv?${exportQuery}`}
           title="Downloads every product matching the current filters (not just this page)"
         >
           Export CSV
         </a>
         <a
           className={buttonVariants({ variant: "outline", size: "xs" })}
-          href={`${exportHref}/json`}
+          href={`/api/products/export/json?${exportQuery}`}
           title="Downloads every product matching the current filters (not just this page)"
         >
           Export JSON

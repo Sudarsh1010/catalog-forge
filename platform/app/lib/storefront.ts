@@ -48,6 +48,14 @@ export function resolveLocale(country?: string | null): StoreLocale {
     : SOURCE_LOCALE
 }
 
+/**
+ * One searchParams value: Next hands repeated keys back as arrays, so the
+ * storefront pages take the first occurrence instead of coercing inline.
+ */
+export function searchParam(value?: string | string[]): string | undefined {
+  return Array.isArray(value) ? value[0] : value
+}
+
 export type StorefrontCard = {
   handle: string
   title: string
