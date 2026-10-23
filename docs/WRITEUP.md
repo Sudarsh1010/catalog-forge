@@ -184,3 +184,21 @@ harness; humans set the gold labels by hand, decided the grading rules, and
 reviewed every measured claim in this document. Fittingly, the product's own
 discipline — grounded, source-citable output — is the discipline that made
 agent-built code trustworthy here.
+
+## Known issues
+
+- **Browser-bundle oRPC queries never fire** (2026-10-23): in a real Chromium
+  tab, TanStack Query calls through the browser oRPC client (`lib/orpc.ts`,
+  `RPCLink`) stay `isPending` forever on `/` (import queue) and `/products`.
+  Dossier: hydration commits (dark-mode hotkey works), page timers run, the
+  endpoint returns 200 to a manual in-page `fetch('/api/rpc/import/list')`,
+  no client request is ever issued by the oRPC link, and an absolute-URL
+  `RPCLink` makes no difference. The test suites exercise the API only
+  through the Node-side typed client, so this surface is untested — a
+  browser-level smoke test is the follow-up. Also note `/` is statically
+  prerendered in the production build, which bakes the queue's error card
+  into the HTML; `export const dynamic = "force-dynamic"` on the dashboard
+  page is the recommended fix.
+- **Layer 2 + cost-per-1,000 measured numbers pending an `OPENAI_API_KEY`**;
+  the scripts (`pnpm --filter @workspace/worker eval:l2`) are wired and
+  verified against an injected fake provider.

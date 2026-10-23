@@ -91,15 +91,17 @@ pnpm dev
 
 ## Screenshots
 
-<!-- TODO(capture): replace with real screenshots/GIFs -->
+Captured from a Demo Mode run over the committed Eval Set sheet
+(`eval/supplier-sheet.csv`, 121 rows → 42 products):
 
-| What | Where to capture | Placeholder |
+| What | Where | Screenshot |
 | --- | --- | --- |
-| Dashboard — import list | `/` | ![dashboard-imports](docs/screenshots/dashboard-imports.png) |
 | Dashboard — pipeline detail | `/imports/[id]` | ![import-detail](docs/screenshots/dashboard-import-detail.png) |
-| Needs-review queue | `/imports/[id]` (review panel) | ![needs-review](docs/screenshots/needs-review.png) |
-| Storefront collection | `/storefront` | ![storefront](docs/screenshots/storefront-collection.png) |
-| Storefront product | `/storefront/[handle]` | ![storefront-product](docs/screenshots/storefront-product.png) |
+| Storefront collection (German) | `/storefront?country=DE` | ![storefront](docs/screenshots/storefront-collection.png) |
+| Storefront product (German) | `/storefront/[handle]?country=DE` | ![storefront-product](docs/screenshots/storefront-product.png) |
+
+The import-list and needs-review views are pending a client-query fix —
+see Known issues in `docs/WRITEUP.md`.
 
 ## Tech stack
 
