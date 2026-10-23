@@ -38,6 +38,7 @@ import {
 import { createLogger } from "@workspace/log"
 
 import type { JobContext, JobHandler } from "../handlers"
+import { requeueCoveringProductJobs } from "../requeue"
 import { UnionFind, codeFamilyRelation, familyBase } from "./cluster"
 import { mapColumns, type ColumnRoles } from "./columns"
 import { identityKey, keyHash, normalizeGtin } from "./keys"
@@ -580,6 +581,9 @@ interface FamilyVariant {
   attributes: Record<string, string>
   imageRef: string | null
   missingFromSource: boolean
+  /** Sheet-owned (unlike the Product's sticky flag): see adoptProductDraft. */
+  needsReview: boolean
+  reviewReason: string | null
 }
 
 interface FamilyProduct {
@@ -653,7 +657,7 @@ async function loadFamilyCatalog(
   const variantRows = (await db.execute(sql`
     SELECT v.id, v.product_id, v.variant_key_hash, v.sku, v.gtin,
            v.price_cents, v.price_currency, v.attributes, v.image_ref,
-           v.missing_from_source
+           v.missing_from_source, v.needs_review, v.review_reason
     FROM variants v
     WHERE v.store_id = ${storeId}
       AND v.product_id IN (
@@ -671,6 +675,8 @@ async function loadFamilyCatalog(
     attributes: Record<string, string>
     image_ref: string | null
     missing_from_source: boolean
+    needs_review: boolean
+    review_reason: string | null
   }>
   for (const row of variantRows) {
     productsById.get(row.product_id)?.variants.set(row.variant_key_hash, {
@@ -683,6 +689,8 @@ async function loadFamilyCatalog(
       attributes: row.attributes ?? {},
       imageRef: row.image_ref,
       missingFromSource: row.missing_from_source,
+      needsReview: row.needs_review,
+      reviewReason: row.review_reason,
     })
   }
   return { products }
@@ -991,10 +999,16 @@ async function adoptProductDraft(
   if (existing.description !== draft.description)
     productPatch.description = draft.description
   if (existing.gtin !== draft.gtin) productPatch.gtin = draft.gtin
-  if (existing.needsReview !== draft.needsReview)
-    productPatch.needsReview = draft.needsReview
-  if (existing.reviewReason !== draft.reviewReason)
+  // The Product's `needs_review` is a STICKY quality flag: enrichment's
+  // gateNeedsReview sets it post-enrichment and "gating never clears"
+  // (enrich/handler.ts, ADR-0003 convergence). Re-import therefore may only
+  // SET it from sheet evidence — never clear it, never overwrite a reason
+  // already recorded (even a low-confidence one) — so an unchanged
+  // re-upload preserves an enrichment-set flag instead of wiping it.
+  if (draft.needsReview && !existing.needsReview) {
+    productPatch.needsReview = true
     productPatch.reviewReason = draft.reviewReason
+  }
   if (Object.keys(productPatch).length > 0) {
     await tx
       .update(products)
@@ -1043,6 +1057,14 @@ async function adoptProductDraft(
       JSON.stringify(current.attributes) !== JSON.stringify(variant.attributes)
     )
       variantPatch.attributes = variant.attributes
+    // Variant `needs_review`/`review_reason` are SHEET-owned (unlike the
+    // Product's sticky flag): symmetric diff — set when this sheet's
+    // evidence flags a conflict (e.g. conflicting prices, EC-061), cleared
+    // when a later re-import's sheet resolves it.
+    if (current.needsReview !== variant.needsReview)
+      variantPatch.needsReview = variant.needsReview
+    if (current.reviewReason !== variant.reviewReason)
+      variantPatch.reviewReason = variant.reviewReason
 
     if (Object.keys(variantPatch).length > 0) {
       // The sheet that last contributed these values is this one.
@@ -1222,44 +1244,20 @@ async function flagTranslationsOutOfDate(
   // is not proof the new text needs nothing.
   if (!hasStaleAi[0]?.stale_ai && anyTranslations[0]?.any_rows) return
 
-  // This Product's 1-based ordinal in its birth Import's deterministic
-  // Batch order (ADR-0002) — the same order the planner and the translate
-  // handler read.
-  const ordinal = (await tx.execute(sql`
-    SELECT ordinal FROM (
-      SELECT id, ROW_NUMBER() OVER (ORDER BY natural_key_hash) AS ordinal
-      FROM products WHERE import_id = ${existing.importId}
-    ) ranked
-    WHERE ranked.id = ${existing.id}
-  `)) as unknown as Array<{ ordinal: number }>
-  const position = ordinal[0]?.ordinal
-  if (!position) return
-
-  const requeued = (await tx.execute(sql`
-    UPDATE jobs SET
-      status = 'pending',
-      attempts = 0,
-      lease_owner = NULL,
-      lease_expires_at = NULL,
-      available_at = NULL,
-      updated_at = now()
-    WHERE import_id = ${existing.importId}
-      AND stage = 'translate'
-      AND status IN ('completed', 'failed')
-      AND batch_key ~ '^products-[0-9]{6}-[0-9]{6}'
-      AND (regexp_match(
-            batch_key, '^products-([0-9]{6})-([0-9]{6})'
-          ))[1]::int <= ${position}
-      AND (regexp_match(
-            batch_key, '^products-([0-9]{6})-([0-9]{6})'
-          ))[2]::int >= ${position}
-    RETURNING id
-  `)) as unknown as Array<{ id: string }>
-  if (requeued.length > 0) {
+  // The translate Jobs of the Product's deterministic Batch requeue via
+  // the shared helper (the same path the Sweeper uses for Re-run facts,
+  // ADR-0004) with reset attempts when AI work exists to redo.
+  const requeuedJobIds = await requeueCoveringProductJobs(
+    tx,
+    existing.importId,
+    "translate",
+    [existing.id]
+  )
+  if (requeuedJobIds.length > 0) {
     log.info(`requeued translate jobs for out-of-date product`, {
       productId: existing.id,
       importId: existing.importId,
-      jobIds: requeued.map((row) => row.id),
+      jobIds: requeuedJobIds,
     })
   }
 }

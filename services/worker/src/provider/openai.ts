@@ -3,9 +3,14 @@
  * Provider handling) — Vercel AI SDK (`ai` + `@ai-sdk/openai`). Two models,
  * routed by the registry's Messiness tiers: gpt-4o-mini serves "fast"
  * (clean rows), gpt-4o serves "strong" (messy rows and photo/vision work).
- * Both entries share ONE registered provider id (`openai`), so a Pause on
- * either model holds the provider's Jobs across ALL Imports (GLOSSARY:
- * Pause) while other providers keep working.
+ * Which tier serves a call is decided per row — the caller's enrich-time
+ * photo-aware Messiness Score — while the Job's plan-time routing stamp
+ * remains Pause/claim-gate metadata only. Vision is real on the strong
+ * tier: matched photos (`EnrichInput.photos`) are sent as image content
+ * parts alongside the prompt; the fast tier stays text-only. Both entries
+ * share ONE registered provider id (`openai`), so a Pause on either model
+ * holds the provider's Jobs across ALL Imports (GLOSSARY: Pause) while
+ * other providers keep working.
  *
  * Selection is config, not code: `main.ts` registers these entries only
  * when OPENAI_API_KEY is set. Without a key Demo Mode's stub serves both
@@ -65,6 +70,7 @@ import {
   TRANSLATE_FIELDS,
   slugifyHandle,
   type EnrichInput,
+  type EnrichPhoto,
   type EnrichmentResult,
   type FieldConfidence,
   type Provider,
@@ -89,6 +95,13 @@ export interface OpenAIProviderOptions {
   fetch?: typeof globalThis.fetch
   /** Per-call timeout in ms (aborts the request; maps to `timeout`). */
   timeoutMs?: number
+  /**
+   * Send the input's matched photos as real image content parts (vision).
+   * The strong tier only — gpt-4o-mini stays text-only, so a photo-heavy
+   * clean row costs text rates. Enrich calls carry photo bytes in
+   * `EnrichInput.photos`; without them (or off) the prompt stays text.
+   */
+  vision?: boolean
 }
 
 // ------------------------------------------------------------- prompts --
@@ -458,19 +471,40 @@ export function createOpenAIProvider(
     ...(options.fetch !== undefined ? { fetch: options.fetch } : {}),
   })
   const model = client.chat(options.model)
-  const { model: modelName, timeoutMs } = options
+  const { model: modelName, timeoutMs, vision = false } = options
 
   async function call<T>(
     schema: z.ZodType<T>,
     system: string,
-    prompt: string
+    prompt: string,
+    images: readonly EnrichPhoto[] = []
   ): Promise<{ value: T; tokensIn: number; tokensOut: number }> {
     let result
     try {
       result = await generateText({
         model,
         system,
-        prompt,
+        // Vision: the matched photos ride along as real image content parts
+        // after the text prompt. Text-only calls keep the plain prompt.
+        ...(images.length > 0
+          ? {
+              messages: [
+                {
+                  role: "user" as const,
+                  content: [
+                    { type: "text" as const, text: prompt },
+                    ...images.map((photo) => ({
+                      type: "image" as const,
+                      image: photo.data,
+                      ...(photo.contentType
+                        ? { mediaType: photo.contentType }
+                        : {}),
+                    })),
+                  ],
+                },
+              ],
+            }
+          : { prompt }),
         output: Output.object({ schema }),
         temperature: 0,
         maxRetries: 0,
@@ -511,7 +545,10 @@ export function createOpenAIProvider(
       const { value, tokensIn, tokensOut } = await call(
         enrichOutputSchema,
         ENRICH_SYSTEM_PROMPT,
-        enrichUserPrompt(input)
+        enrichUserPrompt(input),
+        // Vision is the strong tier's job: the matched photos ride along as
+        // real image content parts there; the fast tier stays text-only.
+        vision ? (input.photos ?? []) : []
       )
       return {
         value: toEnrichmentResult(value, input),
@@ -565,9 +602,10 @@ export function createOpenAIProvider(
 
 /**
  * The two registry entries `main.ts` registers when OPENAI_API_KEY is set:
- * gpt-4o-mini for "fast" (clean rows), gpt-4o for "strong" (messy/photo
- * rows) — routed by the Messiness Score at plan time, one shared provider
- * id so a Pause holds both tiers.
+ * gpt-4o-mini for "fast" (clean rows, text-only), gpt-4o for "strong"
+ * (messy/photo rows — vision: matched photos go out as image content
+ * parts). Tiers are resolved per call from the enrich-time photo-aware
+ * Messiness Score; one shared provider id so a Pause holds both tiers.
  */
 export function openAIProviderEntries(
   options: OpenAIProviderOptions & { concurrency: number }
@@ -582,6 +620,7 @@ export function openAIProviderEntries(
       provider: createOpenAIProvider({
         ...options,
         model: OPENAI_STRONG_MODEL,
+        vision: true,
       }),
       concurrency: options.concurrency,
       tiers: ["strong"],

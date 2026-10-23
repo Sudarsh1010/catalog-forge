@@ -221,6 +221,8 @@ interface VariantRow {
   missing_from_source: boolean
   missing_since: string | null
   source_row_index: number
+  needs_review: boolean
+  review_reason: string | null
   updated_at: string
 }
 
@@ -228,7 +230,8 @@ async function variantsOf(productId: string): Promise<VariantRow[]> {
   return (await db.db.execute(sql`
     SELECT id, sku, variant_key, price_cents, price_currency,
            missing_from_source, missing_since::text AS missing_since,
-           source_row_index, updated_at::text AS updated_at
+           source_row_index, needs_review, review_reason,
+           updated_at::text AS updated_at
     FROM variants WHERE product_id = ${productId}
     ORDER BY variant_key
   `)) as unknown as VariantRow[]
@@ -487,6 +490,112 @@ describe("re-import key-diff (ticket #14)", () => {
     expect(greenC.missing_from_source).toBe(false)
     expect(greenC.missing_since).toBeNull()
     expect(greenC.price_cents).toBe(1290)
+  }, 90_000)
+
+  it("an enrichment-set Needs Review flag survives an unchanged re-import untouched", async () => {
+    // Original import: two rows, one Product (sku:tp-100), two Variants.
+    const importA = await uploadSheet([ROW_RED, ROW_GREEN])
+    await runPipeline(importA, "w-reimport-f1")
+    const productA = (await familyProducts())[0]!
+
+    // Simulate the post-enrichment gate (enrich's gateNeedsReview: "gating
+    // never clears") having flagged the Product low-confidence.
+    await db.db.execute(sql`
+      UPDATE products SET needs_review = true,
+             review_reason = 'Low-confidence enrichment: category'
+      WHERE id = ${productA.id}
+    `)
+    const flagged = (await familyProducts())[0]!
+    const variantsFlagged = await variantsOf(productA.id)
+
+    // Re-upload: same data rows (order swapped, bytes distinct) — must be a
+    // full no-op that PRESERVES the sticky quality flag (no UPDATE, no
+    // `updated_at` churn, reason never overwritten).
+    const importB = await uploadSheet([ROW_GREEN, ROW_RED], {
+      contentHash: crypto.randomUUID().replaceAll("-", ""),
+    })
+    await runPipeline(importB, "w-reimport-f2")
+
+    const productsAfterB = await familyProducts()
+    expect(productsAfterB).toHaveLength(1)
+    expect(productsAfterB[0]!.id).toBe(productA.id)
+    expect(productsAfterB[0]!.updated_at).toBe(flagged.updated_at)
+    // The product rows were read back with the flag columns.
+    const flaggedAfter = (await db.db.execute(sql`
+      SELECT needs_review, review_reason FROM products
+      WHERE id = ${productA.id}
+    `)) as unknown as Array<{
+      needs_review: boolean
+      review_reason: string | null
+    }>
+    expect(flaggedAfter[0]!.needs_review).toBe(true)
+    expect(flaggedAfter[0]!.review_reason).toBe(
+      "Low-confidence enrichment: category"
+    )
+    // Zero variant UPDATEs too: byte-for-byte identical rows.
+    expect(await variantsOf(productA.id)).toEqual(variantsFlagged)
+    // Adoption costs no AI.
+    expect(await usageCount(importB)).toBe(0)
+  }, 60_000)
+
+  it("conflicting variant prices on re-import flag the Variant; a resolving sheet clears it — the Product's sticky flag stays", async () => {
+    const importA = await uploadSheet([ROW_RED, ROW_GREEN])
+    await runPipeline(importA, "w-reimport-g1")
+    const productA = (await familyProducts())[0]!
+
+    // Re-upload: TP-100-R appears twice with DIFFERENT prices (12,50 vs
+    // 99,00) — sheet evidence of a conflicting price (EC-061).
+    const conflicting = [
+      "TP-100-R",
+      "Watering pot 5L",
+      "Brunner",
+      "Garden > Watering",
+      "Durable steel watering pot for indoor and outdoor use.",
+      "99,00",
+      "rot",
+    ]
+    const importB = await uploadSheet([ROW_RED, conflicting], {
+      contentHash: crypto.randomUUID().replaceAll("-", ""),
+    })
+    await runPipeline(importB, "w-reimport-g2")
+
+    expect(await familyProducts()).toHaveLength(1)
+    const variantsB = await variantsOf(productA.id)
+    const redB = variantsB.find((variant) => variant.sku === "TP-100-R")!
+    const greenB = variantsB.find((variant) => variant.sku === "TP-100-G")!
+    expect(redB.needs_review).toBe(true)
+    expect(redB.review_reason).toContain("1250")
+    expect(redB.review_reason).toContain("9900")
+    expect(greenB.needs_review).toBe(false)
+    // The conflict mirrors onto the Product's (sticky) flag.
+    const flaggedB = (await db.db.execute(sql`
+      SELECT needs_review, review_reason FROM products WHERE id = ${productA.id}
+    `)) as unknown as Array<{
+      needs_review: boolean
+      review_reason: string | null
+    }>
+    expect(flaggedB[0]!.needs_review).toBe(true)
+
+    // Third import: the sheet resolves the conflict (one row, one price).
+    // The VARIANT flag clears (sheet-owned), the PRODUCT flag survives
+    // (sticky — "gating never clears").
+    const importC = await uploadSheet([ROW_RED, ROW_GREEN], {
+      contentHash: crypto.randomUUID().replaceAll("-", ""),
+    })
+    await runPipeline(importC, "w-reimport-g3")
+
+    const variantsC = await variantsOf(productA.id)
+    const redC = variantsC.find((variant) => variant.sku === "TP-100-R")!
+    expect(redC.needs_review).toBe(false)
+    expect(redC.review_reason).toBeNull()
+    const flaggedC = (await db.db.execute(sql`
+      SELECT needs_review, review_reason FROM products WHERE id = ${productA.id}
+    `)) as unknown as Array<{
+      needs_review: boolean
+      review_reason: string | null
+    }>
+    expect(flaggedC[0]!.needs_review).toBe(true)
+    expect(flaggedC[0]!.review_reason).toContain("Conflicting prices")
   }, 90_000)
 
   it("kill/restart mid re-import reconciles: counts add up, zero duplicates", async () => {

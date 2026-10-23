@@ -11,6 +11,10 @@
  * field) and never overwrite a manual Origin (GLOSSARY: Origin). A
  * source-locale no-op produces nothing and costs nothing (EC-088). Usage
  * rows land per real call; retries append by design.
+ *
+ * Routing is per row (spec #12): each item's enrich-time photo-aware
+ * Messiness Score picks the call's model tier. The Job's plan-time
+ * routing_tier/provider_id stamp is claim-gate and Pause metadata only.
  */
 import { createHash } from "node:crypto"
 import { eq, sql } from "drizzle-orm"
@@ -30,10 +34,8 @@ import { parseProductBatchKey } from "@workspace/pipeline"
 import { healBatchRows } from "../poison"
 import {
   routingTierFor,
-  routingTierFrom,
   costMicrosFor,
   type ProviderRegistry,
-  type RoutingTier,
   type TranslateField,
 } from "../provider"
 
@@ -68,9 +70,11 @@ export function createTranslateHandler(deps: TranslateDeps): JobHandler {
     const locale = range.locale as (typeof TARGET_LOCALES)[number]
 
     const batch = await loadBatch(db, job.importId, range.start, range.end)
-    // The tier travels on the Job (stamped at plan time); the per-item
-    // messiness recorded at enrich time is the fallback.
-    const tier = routingTierFrom(job.routingTier)
+    // The Job's routing_tier/provider_id stamp (plan time) is claim-gate and
+    // Pause metadata only. The model tier for EACH translate call comes from
+    // the item's enrich-time photo-aware Messiness Score (recorded on
+    // `product_enrichments.messiness`) — clean rows in a mixed Batch route
+    // fast, photo/messy rows strong.
     for (const item of batch) {
       await translateProduct(
         db,
@@ -78,8 +82,7 @@ export function createTranslateHandler(deps: TranslateDeps): JobHandler {
         job.storeId,
         job.importId,
         item,
-        locale,
-        tier
+        locale
       )
     }
     // A retry that succeeded heals the poison quarantine (EC-122).
@@ -115,7 +118,7 @@ async function loadImport(
 interface BatchItem {
   productId: string
   brand: string | null
-  /** Messiness recorded at enrich time — routes the tier (GLOSSARY). */
+  /** The enrich-time photo-aware Messiness Score — picks this call's tier. */
   messiness: number
   fields: Partial<Record<TranslateField, string>>
   protectedTokens: string[]
@@ -250,15 +253,15 @@ async function translateProduct(
   storeId: string,
   importId: string,
   item: BatchItem,
-  locale: (typeof TARGET_LOCALES)[number],
-  tier: RoutingTier | null
+  locale: (typeof TARGET_LOCALES)[number]
 ): Promise<void> {
   // Per-field triage before any provider involvement:
   //   current — a translation already pins this exact source hash: nothing
   //     to do (this is what makes a requeued Batch free for unchanged
   //     Products), and a stale Out-of-Date flag self-heals;
   //   memoized — Translation Memory has the source hash cached: write the
-  //     row from the cache, no provider call, no usage;
+  //     row from the cache (identity entries — target equals source — stay
+  //     rowless no-ops, EC-088), no provider call, no usage;
   //   missing — the only fields the provider call is about.
   const existing = await existingTranslationsOf(db, item.productId, locale)
   const missing: TranslateField[] = []
@@ -281,16 +284,21 @@ async function translateProduct(
     }
     const cached = await memoryHit(db, storeId, locale, field, hash)
     if (cached !== null) {
-      await upsertTranslation(
-        db,
-        storeId,
-        importId,
-        item,
-        locale,
-        field,
-        cached,
-        hash
-      )
+      // An identity TM entry (EC-088: target text equals source) stays a
+      // no-op — the cache confirms there is nothing to translate, so no
+      // product_translations row lands, exactly like the first pass.
+      if (cached !== item.fields[field]) {
+        await upsertTranslation(
+          db,
+          storeId,
+          importId,
+          item,
+          locale,
+          field,
+          cached,
+          hash
+        )
+      }
       continue
     }
     missing.push(field)
@@ -300,26 +308,54 @@ async function translateProduct(
   if (missing.length === 0) return
 
   const translateStartedAt = Date.now()
-  const call = await registry.run(
-    tier ?? routingTierFor(item.messiness),
-    (provider) =>
-      provider.translate({
-        locale,
-        fields: Object.fromEntries(
-          missing.map((field) => [field, item.fields[field]!])
-        ) as Partial<Record<TranslateField, string>>,
-        brand: item.brand,
-        protectedTokens: item.protectedTokens,
-      })
+  // Per-row routing (spec #12): THIS item's enrich-time photo-aware score
+  // picks the model tier — never the Job's plan-time stamp, which only
+  // steers the Pause claim gate.
+  const call = await registry.run(routingTierFor(item.messiness), (provider) =>
+    provider.translate({
+      locale,
+      fields: Object.fromEntries(
+        missing.map((field) => [field, item.fields[field]!])
+      ) as Partial<Record<TranslateField, string>>,
+      brand: item.brand,
+      protectedTokens: item.protectedTokens,
+    })
   )
   const translateDurationMs = Date.now() - translateStartedAt
 
-  // EC-088: fields whose "translation" equals the source are no-ops — the
-  // provider had nothing to do. Only changed fields land; if none changed,
-  // the call cost nothing.
+  // EC-088: fields whose "translation" equals the source are identity no-ops —
+  // the provider echoed the text back, so no product_translations row lands
+  // (nothing was translated). But the identity mapping is still cached in
+  // Translation Memory: the next Product with identical source text is served
+  // from the cache and never pays a second provider call (ticket #15).
   const changed = missing.filter(
     (field) => call.value.fields[field] !== item.fields[field]
   )
+  const identical = missing.filter(
+    (field) => call.value.fields[field] === item.fields[field]
+  )
+  for (const field of identical) {
+    await db
+      .insert(translationMemory)
+      .values({
+        storeId,
+        locale,
+        field,
+        sourceTextHash: sourceHash(item.fields[field]!),
+        text: item.fields[field]!,
+        providerId: call.usage.providerId,
+        model: call.usage.model,
+      })
+      .onConflictDoUpdate({
+        target: [
+          translationMemory.storeId,
+          translationMemory.locale,
+          translationMemory.field,
+          translationMemory.sourceTextHash,
+        ],
+        set: { text: sql`EXCLUDED.text`, updatedAt: new Date() },
+      })
+  }
   for (const field of changed) {
     await upsertTranslation(
       db,

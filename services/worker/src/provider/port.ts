@@ -28,15 +28,6 @@ export function routingTierFor(messinessScore: number): RoutingTier {
 }
 
 /**
- * The Job's plan-time routing tier, when it carries a valid one — a Job
- * stamped at plan time routes ALL its calls to the provider its claim gate
- * knows about; `null` (unstamped/legacy Jobs) leaves routing per call.
- */
-export function routingTierFrom(value: string | null): RoutingTier | null {
-  return value === "fast" || value === "strong" ? value : null
-}
-
-/**
  * Provider failure classes (EC-082's three behaviors + EC-081 structured
  * output). `rate_limited` carries the honored Retry-After; `invalid_json`
  * covers malformed/unusable provider output INCLUDING the translate
@@ -121,6 +112,14 @@ export interface EnrichInput {
   attributes: Record<string, string>
   /** Matched photos (EC-072) — context, never a claim source. */
   photoCount: number
+  /**
+   * The matched photos' content, when the caller loaded it (the enrich
+   * handler downloads the bytes from object storage). The strong-tier
+   * provider sends them as real image content parts (vision); the fast
+   * tier and the Demo stub ignore them. Optional: Demo Mode and test
+   * doubles construct inputs without bytes.
+   */
+  photos?: EnrichPhoto[]
   /** Messiness Score 0–100: decides the routing tier, nothing else in Demo Mode. */
   messiness: number
   sourceRows: number[]
@@ -130,6 +129,20 @@ export interface EnrichInput {
    * in. Optional: Demo Mode and test doubles construct inputs without them.
    */
   sourceRowValues?: Array<{ rowIndex: number; values: Record<string, string> }>
+}
+
+/**
+ * One matched photo's content (EC-072), loaded by the enrich handler at
+ * enrich time. `fileId` is the `import_files` id — the app streams the same
+ * bytes at `/api/photos/[fileId]` — and `filename`/`contentType` come from
+ * that row.
+ */
+export interface EnrichPhoto {
+  fileId: string
+  filename: string
+  contentType: string | null
+  /** The photo's bytes, downloaded from object storage. */
+  data: Uint8Array
 }
 
 /** The fields translate localizes (storefront text; EC-098 batches them). */

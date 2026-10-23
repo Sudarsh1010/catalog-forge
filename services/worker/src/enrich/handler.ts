@@ -6,6 +6,14 @@
  * machinery is real in Demo Mode), and records one synthetic usage row per
  * provider call so cost aggregates by Import and Product.
  *
+ * Routing is per row (spec #12): the model tier for EACH enrich call comes
+ * from that Product's enrich-time photo-aware Messiness Score, so clean
+ * rows in a mixed Batch stay on the fast tier. The Job's plan-time
+ * routing_tier/provider_id stamp is claim-gate and Pause metadata only (a
+ * Pause holds the whole Batch under its neediest tier's provider). Matched
+ * photos (EC-072) are downloaded from object storage and passed through so
+ * the strong tier performs real vision.
+ *
  * Idempotent (ADR-0003): enrichment upserts on the Product and gating only
  * ever sets (never clears) Needs Review — a redelivered Job converges.
  * Usage rows are the documented exception: a retry really paid for another
@@ -15,6 +23,7 @@
 import { eq, sql } from "drizzle-orm"
 
 import type { Database } from "@workspace/db"
+import type { Storage } from "@workspace/storage"
 import {
   productEnrichments,
   imports,
@@ -27,20 +36,27 @@ import type { JobContext, JobHandler } from "../handlers"
 import { parseProductBatchKey } from "@workspace/pipeline"
 import { messinessScore } from "../messiness"
 import { healBatchRows } from "../poison"
+import { downloadObject } from "../storage"
 import {
   routingTierFor,
-  routingTierFrom,
   costMicrosFor,
   type EnrichInput,
+  type EnrichPhoto,
   type EnrichmentResult,
   type ProviderRegistry,
-  type RoutingTier,
 } from "../provider"
 
 const log = createLogger({ service: "worker:enrich" })
 
 export interface EnrichDeps {
   registry: ProviderRegistry
+  /**
+   * Object storage for the matched photos' bytes — loaded at enrich time so
+   * the strong-tier provider can send real image content parts (vision).
+   * Optional: when absent (Demo Mode tests), photos are counted but their
+   * bytes are never loaded and inputs carry no `photos`.
+   */
+  storage?: Storage
 }
 
 /** The post-merge enrichment state the gating decision reads. */
@@ -80,18 +96,19 @@ export function createEnrichHandler(deps: EnrichDeps): JobHandler {
       imp.sheetHeader,
       batch.map((product) => product.id)
     )
-    // The tier travels on the Job (stamped at plan time via the Messiness
-    // Score); a provider-less Job falls back to per-product routing inside
-    // enrichProduct, where the full score is known.
-    const tier = routingTierFrom(job.routingTier)
+    // The Job's routing_tier/provider_id stamp (plan time) is claim-gate and
+    // Pause metadata only — the Pause claim gate holds the whole Batch under
+    // its neediest tier's provider. The model tier for EACH enrich call is
+    // chosen per product inside enrichProduct, from the enrich-time
+    // photo-aware Messiness Score — clean rows in a mixed Batch route fast.
     for (const product of batch) {
       await enrichProduct(
         db,
         deps.registry,
+        deps.storage,
         job.storeId,
         job.importId,
         product,
-        tier,
         sourceRowsByProduct.get(product.id)
       )
     }
@@ -242,13 +259,26 @@ async function loadSourceRows(
   return byProduct
 }
 
+/**
+ * Download one photo's bytes for the provider call. Photos are small images
+ * (the intake's own extraction path treats them the same way); the SDK
+ * needs the whole content in memory anyway.
+ */
+async function photoBytes(storage: Storage, key: string): Promise<Uint8Array> {
+  const chunks: Buffer[] = []
+  for await (const chunk of await downloadObject(storage, key)) {
+    chunks.push(chunk as Buffer)
+  }
+  return Buffer.concat(chunks)
+}
+
 async function enrichProduct(
   db: Database,
   registry: ProviderRegistry,
+  storage: Storage | undefined,
   storeId: string,
   importId: string,
   product: BatchProduct,
-  tier: RoutingTier | null,
   sourceRowValues?: Array<{ rowIndex: number; values: Record<string, string> }>
 ): Promise<void> {
   const memberRows = (await db.execute(sql`
@@ -274,10 +304,34 @@ async function enrichProduct(
     }
   }
 
+  // Matched photos (EC-072), ordered with the app's photo listing. When
+  // storage is configured the bytes are downloaded here so the strong-tier
+  // provider can send them as real image content parts; `photoCount` stays
+  // derived from the matched rows either way.
   const photoRows = (await db.execute(sql`
-    SELECT count(*)::int AS count FROM product_photos WHERE product_id = ${product.id}
-  `)) as unknown as Array<{ count: number }>
-  const photoCount = photoRows[0]?.count ?? 0
+    SELECT f.id AS file_id, f.object_key, f.filename, f.content_type
+    FROM product_photos pp
+    JOIN import_files f ON f.id = pp.import_file_id
+    WHERE pp.product_id = ${product.id}
+    ORDER BY f.filename
+  `)) as unknown as Array<{
+    file_id: string
+    object_key: string
+    filename: string
+    content_type: string | null
+  }>
+  const photoCount = photoRows.length
+  const photos: EnrichPhoto[] = []
+  if (storage !== undefined) {
+    for (const row of photoRows) {
+      photos.push({
+        fileId: row.file_id,
+        filename: row.filename,
+        contentType: row.content_type,
+        data: await photoBytes(storage, row.object_key),
+      })
+    }
+  }
 
   const input: EnrichInput = {
     product: {
@@ -292,6 +346,7 @@ async function enrichProduct(
     },
     attributes,
     photoCount,
+    ...(photos.length > 0 ? { photos } : {}),
     messiness: messinessScore(
       product,
       variants.length,
@@ -303,9 +358,11 @@ async function enrichProduct(
   }
 
   const enrichStartedAt = Date.now()
-  const call = await registry.run(
-    tier ?? routingTierFor(input.messiness),
-    (provider) => provider.enrich(input)
+  // Per-row routing (spec #12): THIS product's enrich-time photo-aware
+  // score picks the model tier — never the Job's plan-time stamp, which
+  // only steers the Pause claim gate.
+  const call = await registry.run(routingTierFor(input.messiness), (provider) =>
+    provider.enrich(input)
   )
   const enrichDurationMs = Date.now() - enrichStartedAt
 

@@ -239,7 +239,7 @@ export async function runEvalPipeline(options?: {
         clean: createCleanHandler(),
         group: createGroupHandler(),
         "match-media": createMatchMediaHandler(),
-        enrich: createEnrichHandler({ registry: registry() }),
+        enrich: createEnrichHandler({ registry: registry(), storage }),
         translate: createTranslateHandler({ registry: registry() }),
         finalise: createFinaliseHandler({ cache }),
       }),

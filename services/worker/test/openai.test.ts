@@ -5,6 +5,7 @@
  * the Confidence gate (EC-099), translate round-trip validation
  * (EC-089/EC-090) and real per-call pricing are the port's pure contract.
  */
+import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 
 import {
@@ -20,11 +21,16 @@ import type { EnrichInput } from "../src/provider/port.js"
 
 // --------------------------------------------------------- fake endpoint --
 
+/** One OpenAI content part as the SDK serializes it for /chat/completions. */
+type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } }
+
 interface RecordedRequest {
   url: string
   body: {
     model?: string
-    messages?: Array<{ role: string; content: string }>
+    messages?: Array<{ role: string; content: string | ContentPart[] }>
     [key: string]: unknown
   }
 }
@@ -289,6 +295,115 @@ describe("openai provider entries", () => {
       OPENAI_FAST_MODEL,
       OPENAI_STRONG_MODEL,
     ])
+  })
+})
+
+// ---------------------------------------------------------------- vision --
+
+/** The user-message content parts of a recorded request. */
+function userParts(request: RecordedRequest): ContentPart[] {
+  const user = request.body.messages?.find((message) => message.role === "user")
+  if (!user) return []
+  return typeof user.content === "string"
+    ? [{ type: "text", text: user.content }]
+    : user.content
+}
+
+describe("openai vision (strong tier sends the matched photos)", () => {
+  // The committed eval photo, as the enrich handler loads it from storage.
+  const photoBytes = readFileSync(
+    new URL("../../../eval/photos/tp-100-rot-01.png", import.meta.url)
+  )
+  const enrichInputWithPhoto: EnrichInput = {
+    ...enrichInput,
+    photoCount: 1,
+    photos: [
+      {
+        fileId: crypto.randomUUID(),
+        filename: "tp-100-rot-01.png",
+        contentType: "image/png",
+        data: photoBytes,
+      },
+    ],
+  }
+
+  it("sends real image content parts on the strong provider's request", async () => {
+    const fake = fakeEndpoint(() => completionContent(validEnrichOutput))
+    const strong = createOpenAIProvider({
+      apiKey: "test-key",
+      model: OPENAI_STRONG_MODEL,
+      vision: true,
+      fetch: fake.fetch,
+    })
+    await strong.enrich(enrichInputWithPhoto)
+
+    const parts = userParts(fake.requests[0]!)
+    // The text prompt rode along (photo count intact)…
+    expect(
+      parts.some(
+        (part) =>
+          part.type === "text" && part.text.includes("photos attached: 1")
+      )
+    ).toBe(true)
+    // …and the photo is a REAL image part carrying the exact bytes.
+    const images = parts.filter(
+      (part): part is Extract<ContentPart, { type: "image_url" }> =>
+        part.type === "image_url"
+    )
+    expect(images).toHaveLength(1)
+    const url = images[0]!.image_url.url
+    expect(url).toMatch(/^data:image\/png;base64,/)
+    expect(Buffer.from(url.slice(url.indexOf(",") + 1), "base64")).toEqual(
+      photoBytes
+    )
+  })
+
+  it("keeps the fast provider text-only even when the input carries photos", async () => {
+    const fake = fakeEndpoint(() => completionContent(validEnrichOutput))
+    // `provider()` builds the fast model: no vision, photo bytes or not.
+    await provider(fake.fetch).enrich(enrichInputWithPhoto)
+
+    const body = JSON.stringify(fake.requests[0]!.body)
+    expect(body).toContain("photos attached: 1")
+    expect(body).not.toContain("image_url")
+  })
+
+  it("sends vision only through the strong registry entry", async () => {
+    const fake = fakeEndpoint((request) =>
+      completionContent({ ...validEnrichOutput, claims: [] })
+    )
+    const registry = createProviderRegistry(
+      openAIProviderEntries({
+        apiKey: "test-key",
+        fetch: fake.fetch,
+        concurrency: 2,
+      })
+    )
+    await registry.run("fast", (p) => p.enrich(enrichInputWithPhoto))
+    await registry.run("strong", (p) => p.enrich(enrichInputWithPhoto))
+
+    expect(fake.requests.map((request) => request.body.model)).toEqual([
+      OPENAI_FAST_MODEL,
+      OPENAI_STRONG_MODEL,
+    ])
+    expect(JSON.stringify(fake.requests[0]!.body)).not.toContain("image_url")
+    expect(JSON.stringify(fake.requests[1]!.body)).toContain("image_url")
+  })
+
+  it("stays a plain text prompt when the input carries no photo bytes", async () => {
+    const fake = fakeEndpoint(() => completionContent(validEnrichOutput))
+    const strong = createOpenAIProvider({
+      apiKey: "test-key",
+      model: OPENAI_STRONG_MODEL,
+      vision: true,
+      fetch: fake.fetch,
+    })
+    // photoCount without bytes (storage not configured / Demo tests).
+    await strong.enrich(enrichInput)
+
+    const body = JSON.stringify(fake.requests[0]!.body)
+    expect(body).toContain("photos attached: 2")
+    expect(body).not.toContain("image_url")
   })
 })
 

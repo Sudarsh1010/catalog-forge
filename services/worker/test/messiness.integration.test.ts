@@ -1,11 +1,12 @@
 /**
  * Messiness Score agreement test — the SQL fragment the match-media planner
  * executes and the TS `messinessScore` the enrich handler records MUST
- * agree on the shared (non-photo) terms, because the plan-time score picks
- * the Batch's routing tier while the enrich-time score travels beside the
- * enrichment. Both read the same weights (`src/messiness.ts`); this test
- * pins the agreement against real Postgres so a drift in the fragment's
- * SQL shape still fails loudly.
+ * agree on the shared (non-photo) terms, because the plan-time score stamps
+ * the Job's routing_tier/provider_id (claim-gate/Pause metadata) while the
+ * enrich-time score picks each enrich/translate call's model tier and
+ * travels beside the enrichment. Both read the same weights
+ * (`src/messiness.ts`); this test pins the agreement against real Postgres
+ * so a drift in the fragment's SQL shape still fails loudly.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { sql } from "drizzle-orm"

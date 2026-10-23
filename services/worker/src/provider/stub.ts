@@ -396,7 +396,9 @@ export function createStubProvider(options?: StubChaosOptions): Provider {
     async enrich(input: EnrichInput): Promise<ProviderCall<EnrichmentResult>> {
       chaos.next()
       const value = enrichDeterministically(input)
-      return { value, usage: usageOf(value, input) }
+      // Photo bytes are vision context for real providers, not tokens Demo
+      // Mode prices — the synthetic estimate sees everything but the bytes.
+      return { value, usage: usageOf(value, { ...input, photos: undefined }) }
     },
     async translate(
       input: TranslateInput

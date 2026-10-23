@@ -106,7 +106,7 @@ const handlers = defineHandlers({
   clean: createCleanHandler(),
   group: createGroupHandler(),
   "match-media": createMatchMediaHandler(),
-  enrich: createEnrichHandler({ registry }),
+  enrich: createEnrichHandler({ registry, storage }),
   translate: createTranslateHandler({ registry }),
   finalise: createFinaliseHandler({ cache }),
 })

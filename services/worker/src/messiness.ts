@@ -6,8 +6,11 @@
  *
  * The planner runs BEFORE media matching, so its fragment covers the
  * non-photo terms only; the photo term and the 100 cap apply at enrich
- * time, when photos are matched. The plan-time score only picks the Batch's
- * routing tier, which Demo Mode treats identically.
+ * time, when photos are matched. The plan-time score only stamps the Job's
+ * routing_tier/provider_id — claim-gate/Pause metadata (a Pause holds the
+ * whole Batch under its neediest tier's provider); the model tier for each
+ * enrich/translate call is chosen per row from the enrich-time
+ * photo-aware score.
  */
 import { sql, type SQL } from "drizzle-orm"
 
@@ -42,7 +45,8 @@ export const MESSINESS_MAX = 100
 
 /**
  * The enrich-time score: the authoritative per-Product value recorded on
- * `product_enrichments.messiness` and used as the routing fallback.
+ * `product_enrichments.messiness` and the one that picks each enrich and
+ * translate call's routing tier.
  */
 export function messinessScore(
   product: MessinessProduct,
