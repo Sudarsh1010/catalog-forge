@@ -65,3 +65,21 @@ streams: catalog export (`GET /api/products/export/[format]` for CSV/JSON)
 and the photo stream (`GET /api/photos/[fileId]`) are plain Next.js route
 handlers — octet streams and file downloads are the same class of
 response-stream surface as upload and SSE, not request/response RPC.
+
+## Addendum (2026-10-23, server-driven dashboard surfaces)
+
+The Products review tab (#11) and the dashboard (`/`) are server-driven:
+the RSC pages run the same query surface the oRPC procedures use
+(`loadProductList` / `loadProductDetail`, the import queue, the metrics
+views) with `dynamic = "force-dynamic"`, so the table, the side-by-side
+review panel and the queue render in the SSR HTML. Products-tab view state
+(page, sort, search, filters, the open panel) lives in the query string,
+and writes (edit, approve, send back, bulk approve) go through server
+actions that call the same lib primitives as the procedures and
+revalidate the route — one roundtrip returns freshly rendered rows.
+For these surfaces TanStack Query no longer owns client server-state
+(above): the oRPC contract remains the canonical typed API for
+request/response reads (the `/api/rpc` mount stays mounted, the browser
+client in `lib/orpc.ts` keeps serving the import queue's live SSE cache
+entries and refetch-on-invalidation), and the actions mirror the
+procedures' semantics so both surfaces cannot drift.
