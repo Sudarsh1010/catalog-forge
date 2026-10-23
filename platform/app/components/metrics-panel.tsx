@@ -16,7 +16,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@workspace/ui/components/card"
-import { Skeleton } from "@workspace/ui/components/skeleton"
 import {
   Table,
   TableBody,
@@ -457,19 +456,20 @@ function SavingsTable({
   )
 }
 
-export function MetricsPanel(): React.ReactElement {
-  const query = useQuery(orpc.metrics.overview.queryOptions())
+export function MetricsPanel({
+  initialOverview,
+}: {
+  initialOverview: MetricsOverviewDto
+}): React.ReactElement {
+  // The server-rendered overview seeds the query: the tab renders real
+  // numbers in the SSR HTML, and the browser link only refetches on
+  // invalidation.
+  const query = useQuery({
+    ...orpc.metrics.overview.queryOptions(),
+    initialData: initialOverview,
+  })
 
-  if (query.isPending) {
-    return (
-      <div className="grid gap-4">
-        <Skeleton className="h-40" />
-        <Skeleton className="h-40" />
-      </div>
-    )
-  }
-
-  if (query.isError) {
+  if (query.isError && !query.data) {
     return (
       <p className="text-sm text-destructive">
         The metrics could not be loaded — try again.
@@ -477,7 +477,7 @@ export function MetricsPanel(): React.ReactElement {
     )
   }
 
-  const overview = query.data
+  const overview = query.data ?? initialOverview
 
   return (
     <div className="grid gap-4">

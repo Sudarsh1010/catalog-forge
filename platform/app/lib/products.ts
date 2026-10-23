@@ -12,6 +12,8 @@
 import type { Database } from "@workspace/db"
 import { sql, type SQL } from "drizzle-orm"
 
+import { DEFAULT_STORE_ID } from "@workspace/pipeline"
+
 import {
   CONFIDENCE_HIGH_FROM,
   CONFIDENCE_LOW_BELOW,
@@ -571,10 +573,12 @@ export async function editProduct(
   // re-import changes the English: the translate Stage reads the
   // enrichment's English as its source text, so every translation of a
   // CHANGED text field is flagged (conservatively — over-flagging
-  // self-heals on the next translate run), and the translate Jobs of the
-  // Product's deterministic Batch are requeued so AI work actually redoes
-  // the translation. Manual-Origin rows keep their text; the flag is the
-  // merchant's signal.
+  // self-heals on the next translate run). Manual-Origin rows keep their
+  // text; the flag is the merchant's signal. The re-run itself is the
+  // app's half of the DB contract (ADR-0004): the app writes a `reruns`
+  // FACT carrying this Product, and the Worker's Sweeper adopts it by
+  // requeuing the translate Jobs whose Batch covers it — the app never
+  // touches Job machinery.
   const ENGLISH_TEXT_FIELDS = ["title", "description", "category"]
   const changedTextFields = edited
     .map(([field]) => field)
@@ -618,37 +622,21 @@ export async function editProduct(
         : { ok: false, reason: "not_found" }
     }
 
-    const ordinal = rowsOf<{ ordinal: number }>(
+    // The FACT (ADR-0004): one `reruns` row for this Product at the
+    // translate stage; the Worker's Sweeper adopts it by requeuing the
+    // translate Jobs whose deterministic Batch covers the Product.
+    // Idempotent downstream: if the Jobs are already pending, the
+    // adoption requeues nothing.
+    const productRow = rowsOf<{ import_id: string }>(
       await db.execute(sql`
-        SELECT ordinal FROM (
-          SELECT id, ROW_NUMBER() OVER (ORDER BY natural_key_hash) AS ordinal
-          FROM products WHERE import_id = (
-            SELECT import_id FROM products WHERE id = ${id}
-          )
-        ) ranked
-        WHERE ranked.id = ${id}
+        SELECT import_id FROM products WHERE id = ${id}
       `)
     )
-    const position = ordinal[0]?.ordinal
-    if (position) {
+    const importId = productRow[0]?.import_id
+    if (importId) {
       await db.execute(sql`
-        UPDATE jobs SET
-          status = 'pending',
-          attempts = 0,
-          lease_owner = NULL,
-          lease_expires_at = NULL,
-          available_at = NULL,
-          updated_at = now()
-        WHERE import_id = (SELECT import_id FROM products WHERE id = ${id})
-          AND stage = 'translate'
-          AND status IN ('completed', 'failed')
-          AND batch_key ~ '^products-[0-9]{6}-[0-9]{6}'
-          AND (regexp_match(
-                batch_key, '^products-([0-9]{6})-([0-9]{6})'
-              ))[1]::int <= ${position}
-          AND (regexp_match(
-                batch_key, '^products-([0-9]{6})-([0-9]{6})'
-              ))[2]::int >= ${position}
+        INSERT INTO reruns (store_id, import_id, stage, product_ids)
+        VALUES (${DEFAULT_STORE_ID}, ${importId}, 'translate', ARRAY[${id}::uuid])
       `)
     }
   }

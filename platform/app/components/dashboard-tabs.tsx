@@ -2,10 +2,12 @@
 
 /**
  * The dashboard shell (ticket #19): the Import queue and the Metrics tab
- * over the Postgres views. Tab state is genuinely-local UI state — no
- * server state beyond the queries each panel already owns.
+ * over the Postgres views. Both panels hydrate from the server-rendered
+ * snapshot and stay live through their own queries and the SSE stream;
+ * tab state is genuinely-local UI state.
  */
 import { useState } from "react"
+import type { ImportDto, MetricsOverviewDto } from "@workspace/contracts"
 import {
   Tabs,
   TabsContent,
@@ -18,7 +20,13 @@ import { MetricsPanel } from "./metrics-panel"
 
 type DashboardTab = "imports" | "metrics"
 
-export function DashboardTabs(): React.ReactElement {
+export function DashboardTabs({
+  initialImports,
+  initialMetrics,
+}: {
+  initialImports: ImportDto[]
+  initialMetrics: MetricsOverviewDto
+}): React.ReactElement {
   const [tab, setTab] = useState<DashboardTab>("imports")
 
   return (
@@ -28,10 +36,10 @@ export function DashboardTabs(): React.ReactElement {
         <TabsTrigger value="metrics">Metrics</TabsTrigger>
       </TabsList>
       <TabsContent value="imports">
-        <ImportDashboard />
+        <ImportDashboard initialImports={initialImports} />
       </TabsContent>
       <TabsContent value="metrics">
-        <MetricsPanel />
+        <MetricsPanel initialOverview={initialMetrics} />
       </TabsContent>
     </Tabs>
   )

@@ -157,6 +157,22 @@ const productContract = {
     .errors({ ...PRODUCT_NOT_FOUND_ERRORS, ...UNKNOWN_PRODUCTS_ERRORS }),
 
   /**
+   * Bulk send back: one transaction writing ONE Re-run FACT carrying all
+   * chosen Product ids (ADR-0004), retracting their Publications and
+   * flagging them for review — the set-based form of sendBack.
+   */
+  bulkSendBack: oc
+    .input(z.object({ ids: z.array(ImportIdSchema).min(1).max(5000) }))
+    .output(
+      z.object({
+        sentBack: z.number(),
+        productIds: z.array(z.string()),
+        skipped: z.array(z.object({ id: z.string(), reason: z.string() })),
+      })
+    )
+    .errors({ ...PRODUCT_NOT_FOUND_ERRORS, ...UNKNOWN_PRODUCTS_ERRORS }),
+
+  /**
    * Send one Product back for re-enrichment: writes the Re-run FACT
    * (GLOSSARY: Re-run, ADR-0004) and retracts its Publications — a
    * Product under review is invisible by construction (ADR-0005).

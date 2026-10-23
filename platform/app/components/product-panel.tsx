@@ -8,18 +8,22 @@
  * at the exact row it came from (GLOSSARY: Claim). The merchant edits
  * (stored with manual Origin), approves, or sends the Product back from
  * here; approval writes Publications (ADR-0005).
+ *
+ * The panel is server-driven (spec #11): the RSC page hydrates the detail
+ * for the `open` query-string id, and the actions are server actions that
+ * revalidate the route, so the refreshed table and panel arrive in the
+ * same roundtrip — no browser-bundle query needed.
  */
-import { useCallback, useState } from "react"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useCallback, useState, useTransition } from "react"
 import type { ProductDetailDto } from "@workspace/contracts"
 
 import { Badge } from "@workspace/ui/components/badge"
 import { Button } from "@workspace/ui/components/button"
 import { Alert, AlertDescription } from "@workspace/ui/components/alert"
-import { Skeleton } from "@workspace/ui/components/skeleton"
 import { cn } from "@workspace/ui/lib/utils"
 
-import { orpc } from "@/lib/orpc"
+import type { ProductTabActions } from "@/app/products/actions"
+
 import {
   CONFIDENCE_FIELDS,
   PRODUCT_STATUS_STYLES,
@@ -28,10 +32,6 @@ import {
 } from "./import-labels"
 
 const ACTION_ERROR = "The action could not be completed — try again."
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback
-}
 
 /** One coloured Confidence chip (per-field, user story 21). */
 function ConfidenceChip({
@@ -84,69 +84,22 @@ const INPUT_CLASS =
   "w-full border border-border bg-background px-2 py-1.5 text-xs outline-none focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50"
 
 export function ProductPanel({
-  productId,
+  product,
   onClose,
+  actions,
 }: {
-  productId: string
+  /** Server-loaded detail for the open id; null when it has none. */
+  product: ProductDetailDto | null
   onClose: () => void
+  /** Server actions, imported in the RSC page and passed down. */
+  actions: Pick<ProductTabActions, "approve" | "edit" | "sendBack">
 }) {
-  const queryClient = useQueryClient()
   const [editing, setEditing] = useState(false)
-
-  const detailQuery = useQuery(
-    orpc.product.detail.queryOptions({ input: { id: productId } })
-  )
-  const product = detailQuery.data?.product
-
-  const invalidate = useCallback((): void => {
-    void queryClient.invalidateQueries({
-      queryKey: orpc.product.detail.queryKey({ input: { id: productId } }),
-    })
-    void queryClient.invalidateQueries({ queryKey: orpc.product.list.key() })
-  }, [productId, queryClient])
-
-  const onError = useCallback(
-    (error: unknown) => setActionError(errorMessage(error, ACTION_ERROR)),
-    []
-  )
+  const [isPending, startTransition] = useTransition()
   const [actionError, setActionError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
-  const editMutation = useMutation({
-    ...orpc.product.edit.mutationOptions(),
-    onSuccess: () => {
-      setEditing(false)
-      setActionError(null)
-      invalidate()
-    },
-    onError,
-  })
-  const approveMutation = useMutation({
-    ...orpc.product.approve.mutationOptions(),
-    onSuccess: () => {
-      setActionError(null)
-      invalidate()
-    },
-    onError,
-  })
-  const sendBackMutation = useMutation({
-    ...orpc.product.sendBack.mutationOptions(),
-    onSuccess: () => {
-      setActionError(null)
-      invalidate()
-    },
-    onError,
-  })
-
-  if (detailQuery.isPending) {
-    return (
-      <div className="flex flex-col gap-3" aria-busy="true">
-        <Skeleton className="h-8 w-full" />
-        <Skeleton className="h-40 w-full" />
-        <Skeleton className="h-40 w-full" />
-      </div>
-    )
-  }
-  if (detailQuery.isError || !product) {
+  if (!product) {
     return (
       <Alert variant="destructive" role="alert">
         <AlertDescription className="text-xs">
@@ -156,13 +109,24 @@ export function ProductPanel({
     )
   }
 
+  const busy = isPending
+
+  const run = (action: () => Promise<{ ok: boolean; message?: string }>) => {
+    setActionError(null)
+    setNotice(null)
+    startTransition(async () => {
+      const result = await action()
+      if (result.ok) {
+        setActionError(null)
+      } else {
+        setActionError(result.message ?? ACTION_ERROR)
+      }
+    })
+  }
+
   const status =
     PRODUCT_STATUS_STYLES[product.status] ?? PRODUCT_STATUS_STYLES.pending!
   const enrichment = product.enrichment
-  const busy =
-    editMutation.isPending ||
-    approveMutation.isPending ||
-    sendBackMutation.isPending
 
   return (
     <div className="flex min-w-0 flex-col gap-4" aria-label="Product review">
@@ -216,9 +180,19 @@ export function ProductPanel({
           <Button
             size="xs"
             disabled={busy || !enrichment || product.status === "approved"}
-            onClick={() => approveMutation.mutate({ id: product.id })}
+            onClick={() =>
+              run(async () => {
+                const result = await actions.approve(product.id)
+                if (result.ok && "publishedLocales" in result) {
+                  setNotice(
+                    `Approved — Publications written for ${result.publishedLocales.join(", ")}.`
+                  )
+                }
+                return result
+              })
+            }
           >
-            {approveMutation.isPending ? "Publishing…" : "Approve"}
+            {isPending ? "Publishing…" : "Approve"}
           </Button>
           <Button
             variant="outline"
@@ -232,24 +206,32 @@ export function ProductPanel({
             variant="outline"
             size="xs"
             disabled={busy}
-            onClick={() => sendBackMutation.mutate({ id: product.id })}
+            onClick={() =>
+              run(async () => {
+                const result = await actions.sendBack(product.id)
+                if (result.ok) {
+                  setNotice(
+                    "Sent back — re-enrichment queued; the worker picks it up like any re-run."
+                  )
+                }
+                return result
+              })
+            }
           >
-            {sendBackMutation.isPending ? "Sending back…" : "Send back"}
+            {isPending ? "Sending back…" : "Send back"}
           </Button>
         </div>
-        {sendBackMutation.isSuccess ? (
-          <p className="text-[11px] text-muted-foreground" role="status">
-            Sent back — re-enrichment queued; the worker picks it up like any
-            re-run.
-          </p>
-        ) : null}
-        {approveMutation.isSuccess ? (
+        {notice ? (
           <p
-            className="text-[11px] text-emerald-700 dark:text-emerald-400"
+            className={cn(
+              "text-[11px]",
+              notice.startsWith("Approved")
+                ? "text-emerald-700 dark:text-emerald-400"
+                : "text-muted-foreground"
+            )}
             role="status"
           >
-            Approved — Publications written for{" "}
-            {approveMutation.data?.publishedLocales.join(", ")}.
+            {notice}
           </p>
         ) : null}
       </header>
@@ -257,8 +239,14 @@ export function ProductPanel({
       {editing && enrichment ? (
         <EditForm
           product={{ ...product, enrichment }}
-          busy={editMutation.isPending}
-          onSave={(fields) => editMutation.mutate({ id: product.id, fields })}
+          busy={isPending}
+          onSave={(fields) =>
+            run(async () => {
+              const result = await actions.edit(product.id, fields)
+              if (result.ok) setEditing(false)
+              return result
+            })
+          }
         />
       ) : null}
 

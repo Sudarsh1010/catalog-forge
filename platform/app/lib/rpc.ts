@@ -359,6 +359,71 @@ const appRouter = os.router({
         return { productId: input.id, requested: 1, stage: "enrich" as const }
       })
     }),
+
+    /**
+     * Bulk send back: one transaction, ONE Re-run FACT per Import carrying
+     * every chosen Product id (ADR-0004 — never one fact per Product),
+     * plus the set-based Publication retraction and review flagging that
+     * single sendBack performs. Idempotent: already-sent-back Products are
+     * simply re-flagged.
+     */
+    bulkSendBack: os.product.bulkSendBack.handler(async ({ input }) => {
+      const db = getDb().db
+      const ids = [...new Set(input.ids)]
+      return db.transaction(async (tx) => {
+        const known = await tx.execute(sql`
+          SELECT id FROM products
+          WHERE id IN (${sql.join(
+            ids.map((id) => sql`${id}::uuid`),
+            sql`, `
+          )})
+        `)
+        const knownIds = new Set(
+          (known as unknown as Array<{ id: string }>).map((row) => row.id)
+        )
+        const missing = ids.filter((id) => !knownIds.has(id))
+        if (missing.length > 0) {
+          throw new ORPCError(UNKNOWN_PRODUCTS, {
+            status: 422,
+            message:
+              "Some selected products no longer exist — refresh the page and try again.",
+          })
+        }
+
+        await tx.execute(sql`
+          INSERT INTO reruns (store_id, import_id, stage, product_ids)
+          SELECT ${DEFAULT_STORE_ID}, p.import_id, 'enrich', ARRAY_AGG(p.id::uuid)
+          FROM products p
+          WHERE p.id IN (${sql.join(
+            ids.map((id) => sql`${id}::uuid`),
+            sql`, `
+          )})
+          GROUP BY p.import_id
+        `)
+        await tx.execute(sql`
+          DELETE FROM publications
+          WHERE product_id IN (${sql.join(
+            ids.map((id) => sql`${id}::uuid`),
+            sql`, `
+          )})
+        `)
+        await tx.execute(sql`
+          UPDATE products SET
+            needs_review = true,
+            review_reason = 'Sent back by merchant — awaiting re-enrichment.',
+            updated_at = now()
+          WHERE id IN (${sql.join(
+            ids.map((id) => sql`${id}::uuid`),
+            sql`, `
+          )})
+        `)
+        return {
+          sentBack: ids.length,
+          productIds: ids,
+          skipped: [] as Array<{ id: string; reason: string }>,
+        }
+      })
+    }),
   },
 
   metrics: {

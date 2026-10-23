@@ -2,26 +2,28 @@
 
 /**
  * The Products review tab (spec user stories 20–24): a server-driven
- * catalog table — pagination 10/25/50/100, sortable columns, search and
- * filters — with per-field Confidence colour coding in every row, plus the
- * side-by-side review panel that opens beside the table. Bulk approve and
- * the per-product actions hit the oRPC `product` namespace; state lives in
- * the query string of this component, never in client-side sorting.
+ * catalog table. The RSC page runs the catalog query and hands the result
+ * down; this component only manages view state, and every view-state
+ * change is a URL update — the page re-renders server-side with the new
+ * rows in the same roundtrip. Writes (edit / approve / bulk approve /
+ * send back) go through server actions that revalidate the route.
  */
-import { useCallback, useEffect, useMemo, useState } from "react"
 import {
-  keepPreviousData,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query"
-import { PRODUCT_PAGE_SIZES, type ProductStatus } from "@workspace/contracts"
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react"
+import { useRouter } from "next/navigation"
+import type { ProductDetailDto, ProductListResult } from "@workspace/contracts"
+import { PRODUCT_PAGE_SIZES } from "@workspace/contracts"
 
 import { Alert, AlertDescription } from "@workspace/ui/components/alert"
 import { Badge } from "@workspace/ui/components/badge"
 import { Button, buttonVariants } from "@workspace/ui/components/button"
 import { Checkbox } from "@workspace/ui/components/checkbox"
-import { Skeleton } from "@workspace/ui/components/skeleton"
 import {
   Table,
   TableBody,
@@ -32,7 +34,8 @@ import {
 } from "@workspace/ui/components/table"
 import { cn } from "@workspace/ui/lib/utils"
 
-import { orpc } from "@/lib/orpc"
+import type { ProductListQuery } from "@/lib/products"
+import type { ProductTabActions } from "@/app/products/actions"
 import {
   CONFIDENCE_FIELDS,
   PRODUCT_STATUS_STYLES,
@@ -41,13 +44,7 @@ import {
 } from "./import-labels"
 import { ProductPanel } from "./product-panel"
 
-const BULK_ERROR = "Bulk approve could not run — try again."
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback
-}
-
-type SortKey = "title" | "status" | "confidence" | "messiness" | "updatedAt"
+type SortKey = ProductListQuery["sort"]
 
 const SORT_COLUMNS: Array<{ key: SortKey; label: string; class?: string }> = [
   { key: "title", label: "Product" },
@@ -69,60 +66,87 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
 const SELECT_CLASS =
   "border border-border bg-background px-2 py-1.5 text-xs outline-none focus-visible:border-ring"
 
-export function ProductsTab(): React.ReactElement {
-  const queryClient = useQueryClient()
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState<number>(25)
-  const [sort, setSort] = useState<SortKey>("updatedAt")
-  const [dir, setDir] = useState<"asc" | "desc">("desc")
-  const [searchInput, setSearchInput] = useState("")
-  const search = useDebouncedValue(searchInput.trim(), 300)
-  const [status, setStatus] = useState<"all" | ProductStatus>("all")
-  const [confidence, setConfidence] = useState<
-    "all" | "low" | "medium" | "high"
-  >("all")
+export interface ProductsTabProps {
+  /** The server-rendered catalog page (already filtered/sorted/paged). */
+  initial: ProductListResult
+  /** The view state the server used — mirrored from the query string. */
+  query: ProductListQuery
+  /** Server-loaded panel detail for `openId` (null when it has none). */
+  detail: ProductDetailDto | null
+  openId: string | undefined
+  /** Server actions, imported in the RSC page and passed down. */
+  actions: ProductTabActions
+}
+
+export function ProductsTab({
+  initial,
+  query,
+  detail,
+  openId,
+  actions,
+}: ProductsTabProps): React.ReactElement {
+  const router = useRouter()
+  const [isPending, startTransition] = useTransition()
+  const [searchInput, setSearchInput] = useState(query.search ?? "")
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
-  const [openId, setOpenId] = useState<string | null>(null)
-  const [bulkError, setBulkError] = useState<string | null>(null)
+  const [bulkMessage, setBulkMessage] = useState<string | null>(null)
+  const [bulkPending, setBulkPending] = useState(false)
 
-  const listQuery = useQuery(
-    orpc.product.list.queryOptions({
-      input: {
-        page,
-        pageSize,
-        sort,
-        dir,
-        status,
-        confidence,
-        search: search.length > 0 ? search : undefined,
-      },
-      placeholderData: keepPreviousData,
-    })
-  )
-  const result = listQuery.data
-  const rows = result?.rows ?? []
-  const totalPages = result
-    ? Math.max(1, Math.ceil(result.total / result.pageSize))
-    : 1
+  const rows = initial.rows
+  const totalPages = Math.max(1, Math.ceil(initial.total / initial.pageSize))
 
-  const invalidateList = useCallback((): void => {
-    void queryClient.invalidateQueries({ queryKey: orpc.product.list.key() })
-  }, [queryClient])
-
-  const bulkMutation = useMutation({
-    ...orpc.product.bulkApprove.mutationOptions(),
-    onSuccess: (data) => {
-      setBulkError(null)
-      setSelected(new Set())
-      if (data.skipped.length > 0) {
-        setBulkError(
-          `Approved ${data.approved}; skipped ${data.skipped.length} not yet enriched.`
-        )
+  /** View-state updates are URL updates; the server renders the result. */
+  const updateQuery = useCallback(
+    (changes: Partial<Record<string, string | undefined>>) => {
+      const params = new URLSearchParams()
+      const merged: Record<string, string | undefined> = {
+        page: String(query.page),
+        pageSize: String(query.pageSize),
+        sort: query.sort,
+        dir: query.dir,
+        status: query.status,
+        confidence: query.confidence,
+        q: query.search,
+        open: openId,
+        ...changes,
       }
-      invalidateList()
+      // Omit defaults so URLs stay clean and shareable.
+      const defaults: Record<string, string> = {
+        page: "1",
+        pageSize: "25",
+        sort: "updatedAt",
+        dir: "desc",
+        status: "all",
+        confidence: "all",
+      }
+      for (const [key, value] of Object.entries(merged)) {
+        if (value === undefined || value === defaults[key]) continue
+        params.set(key, value)
+      }
+      const queryString = params.toString()
+      startTransition(() => {
+        router.push(`/products${queryString ? `?${queryString}` : ""}`, {
+          scroll: false,
+        })
+      })
     },
-    onError: (error) => setBulkError(errorMessage(error, BULK_ERROR)),
-  })
+    [openId, query, router]
+  )
+
+  // Debounced search: push once the input settles; the URL is the truth,
+  // so re-sync the input when the server round-trip lands (back/forward
+  // included).
+  const search = useDebouncedValue(searchInput.trim(), 300)
+  const lastPushedSearch = useRef(query.search ?? "")
+  useEffect(() => {
+    setSearchInput(query.search ?? "")
+    lastPushedSearch.current = query.search ?? ""
+  }, [query.search])
+  useEffect(() => {
+    if (search === lastPushedSearch.current) return
+    lastPushedSearch.current = search
+    updateQuery({ q: search.length > 0 ? search : undefined, page: undefined })
+  }, [search, updateQuery])
 
   const toggle = useCallback((id: string): void => {
     setSelected((previous) => {
@@ -141,24 +165,30 @@ export function ProductsTab(): React.ReactElement {
     )
   }, [rows])
 
+  /** View changes re-render the table — drop stale row selections. */
   const setSortColumn = useCallback(
     (key: SortKey): void => {
-      if (key === sort) {
-        setDir((previous) => (previous === "asc" ? "desc" : "asc"))
-      } else {
-        setSort(key)
-        setDir(key === "title" || key === "status" ? "asc" : "desc")
-      }
-      setPage(1)
+      const dir =
+        key === query.sort
+          ? query.dir === "asc"
+            ? "desc"
+            : "asc"
+          : key === "title" || key === "status"
+            ? "asc"
+            : "desc"
+      setSelected(new Set())
+      updateQuery({ sort: key, dir, page: undefined })
     },
-    [sort]
+    [query.dir, query.sort, updateQuery]
   )
 
-  const resetFilters = useCallback((apply: () => void): void => {
-    apply()
-    setPage(1)
-    setSelected(new Set())
-  }, [])
+  const changeFilter = useCallback(
+    (changes: Partial<Record<string, string | undefined>>): void => {
+      setSelected(new Set())
+      updateQuery({ ...changes, page: undefined })
+    },
+    [updateQuery]
+  )
 
   const approvedSelection = useMemo(
     () =>
@@ -167,16 +197,48 @@ export function ProductsTab(): React.ReactElement {
     [rows, selected]
   )
 
+  const bulkApprove = useCallback((): void => {
+    const ids = [...selected]
+    if (ids.length === 0) return
+    setBulkPending(true)
+    startTransition(async () => {
+      const result = await actions.bulkApprove(ids)
+      setBulkPending(false)
+      setSelected(new Set())
+      if (result.ok) {
+        setBulkMessage(
+          result.skipped.length > 0
+            ? `Approved ${result.approved}; skipped ${result.skipped.length} not yet enriched.`
+            : null
+        )
+      } else {
+        setBulkMessage(result.message)
+      }
+    })
+  }, [selected])
+
+  const bulkSendBack = useCallback((): void => {
+    const ids = [...selected]
+    if (ids.length === 0) return
+    setBulkPending(true)
+    startTransition(async () => {
+      const result = await actions.bulkSendBack(ids)
+      setBulkPending(false)
+      setSelected(new Set())
+      setBulkMessage(result.ok ? null : result.message)
+    })
+  }, [selected])
+
   // The export download carries the tab's active search/filters (not the
   // page): the endpoints serve exactly the filtered catalog, in the
   // table's current sort order.
   const exportQuery = useMemo(() => {
-    const params = new URLSearchParams({ sort, dir })
-    if (search.length > 0) params.set("search", search)
-    if (status !== "all") params.set("status", status)
-    if (confidence !== "all") params.set("confidence", confidence)
+    const params = new URLSearchParams({ sort: query.sort, dir: query.dir })
+    if (query.search) params.set("search", query.search)
+    if (query.status !== "all") params.set("status", query.status)
+    if (query.confidence !== "all") params.set("confidence", query.confidence)
     return params.toString()
-  }, [search, status, confidence, sort, dir])
+  }, [query])
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
@@ -188,17 +250,13 @@ export function ProductsTab(): React.ReactElement {
           placeholder="Search title, handle, key, brand…"
           aria-label="Search products"
           className={cn(SELECT_CLASS, "min-w-48 flex-1")}
-          onChange={(event) =>
-            resetFilters(() => setSearchInput(event.target.value))
-          }
+          onChange={(event) => setSearchInput(event.target.value)}
         />
         <select
           aria-label="Filter by status"
           className={SELECT_CLASS}
-          value={status}
-          onChange={(event) =>
-            resetFilters(() => setStatus(event.target.value as typeof status))
-          }
+          value={query.status}
+          onChange={(event) => changeFilter({ status: event.target.value })}
         >
           <option value="all">All statuses</option>
           <option value="ready">Ready</option>
@@ -209,12 +267,8 @@ export function ProductsTab(): React.ReactElement {
         <select
           aria-label="Filter by confidence"
           className={SELECT_CLASS}
-          value={confidence}
-          onChange={(event) =>
-            resetFilters(() =>
-              setConfidence(event.target.value as typeof confidence)
-            )
-          }
+          value={query.confidence}
+          onChange={(event) => changeFilter({ confidence: event.target.value })}
         >
           <option value="all">All confidence</option>
           <option value="low">Low (&lt;70)</option>
@@ -224,10 +278,8 @@ export function ProductsTab(): React.ReactElement {
         <select
           aria-label="Rows per page"
           className={SELECT_CLASS}
-          value={pageSize}
-          onChange={(event) =>
-            resetFilters(() => setPageSize(Number(event.target.value)))
-          }
+          value={query.pageSize}
+          onChange={(event) => changeFilter({ pageSize: event.target.value })}
         >
           {PRODUCT_PAGE_SIZES.map((size) => (
             <option key={size} value={size}>
@@ -237,12 +289,22 @@ export function ProductsTab(): React.ReactElement {
         </select>
         <Button
           size="xs"
-          disabled={selected.size === 0 || bulkMutation.isPending}
-          onClick={() => bulkMutation.mutate({ ids: [...selected] })}
+          disabled={selected.size === 0 || bulkPending}
+          onClick={bulkApprove}
         >
-          {bulkMutation.isPending
+          {bulkPending
             ? "Approving…"
             : `Approve selected (${approvedSelection > 0 ? approvedSelection : selected.size})`}
+        </Button>
+        <Button
+          size="xs"
+          variant="outline"
+          disabled={selected.size === 0 || bulkPending}
+          onClick={bulkSendBack}
+        >
+          {bulkPending
+            ? "Sending back…"
+            : `Send back selected (${selected.size})`}
         </Button>
         <a
           className={buttonVariants({ variant: "outline", size: "xs" })}
@@ -260,19 +322,12 @@ export function ProductsTab(): React.ReactElement {
         </a>
       </div>
 
-      {bulkError ? (
+      {bulkMessage ? (
         <Alert
           role="status"
           className="border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400 [&>svg]:text-current"
         >
-          <AlertDescription className="text-xs">{bulkError}</AlertDescription>
-        </Alert>
-      ) : null}
-      {listQuery.isError ? (
-        <Alert variant="destructive" role="alert">
-          <AlertDescription className="text-xs">
-            The catalog could not be loaded — try refreshing the page.
-          </AlertDescription>
+          <AlertDescription className="text-xs">{bulkMessage}</AlertDescription>
         </Alert>
       ) : null}
 
@@ -285,14 +340,11 @@ export function ProductsTab(): React.ReactElement {
             : "grid-cols-1"
         )}
       >
-        <div className="flex min-w-0 flex-col gap-2">
-          {listQuery.isPending ? (
-            <div className="flex flex-col gap-2" aria-busy="true">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-            </div>
-          ) : rows.length === 0 ? (
+        <div
+          className="flex min-w-0 flex-col gap-2"
+          aria-busy={isPending || undefined}
+        >
+          {rows.length === 0 ? (
             <p className="border border-dashed border-border px-4 py-6 text-center text-xs text-muted-foreground">
               No products match — enrichment may not have run yet, or the
               filters are too narrow.
@@ -313,8 +365,8 @@ export function ProductsTab(): React.ReactElement {
                       key={column.key}
                       className={column.class}
                       aria-sort={
-                        sort === column.key
-                          ? dir === "asc"
+                        query.sort === column.key
+                          ? query.dir === "asc"
                             ? "ascending"
                             : "descending"
                           : undefined
@@ -330,8 +382,8 @@ export function ProductsTab(): React.ReactElement {
                           aria-hidden
                           className="text-[10px] text-muted-foreground"
                         >
-                          {sort === column.key
-                            ? dir === "asc"
+                          {query.sort === column.key
+                            ? query.dir === "asc"
                               ? "▲"
                               : "▼"
                             : "↕"}
@@ -348,7 +400,7 @@ export function ProductsTab(): React.ReactElement {
                     key={row.id}
                     data-open={openId === row.id || undefined}
                     className="cursor-pointer data-open:bg-muted/60"
-                    onClick={() => setOpenId(row.id)}
+                    onClick={() => updateQuery({ open: row.id })}
                   >
                     <TableCell
                       className="align-top"
@@ -473,33 +525,33 @@ export function ProductsTab(): React.ReactElement {
           )}
 
           {/* --------------------------------------------- pagination */}
-          {result && result.total > 0 ? (
+          {initial.total > 0 ? (
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span suppressHydrationWarning>
-                {((result.page - 1) * result.pageSize + 1).toLocaleString()}–
+                {((initial.page - 1) * initial.pageSize + 1).toLocaleString()}–
                 {Math.min(
-                  result.page * result.pageSize,
-                  result.total
+                  initial.page * initial.pageSize,
+                  initial.total
                 ).toLocaleString()}{" "}
-                of {result.total.toLocaleString()} products
+                of {initial.total.toLocaleString()} products
               </span>
               <span className="flex items-center gap-2">
                 <Button
                   variant="outline"
                   size="xs"
-                  disabled={page <= 1}
-                  onClick={() => setPage((value) => Math.max(1, value - 1))}
+                  disabled={query.page <= 1}
+                  onClick={() => updateQuery({ page: String(query.page - 1) })}
                 >
                   Previous
                 </Button>
                 <span>
-                  Page {result.page} / {totalPages}
+                  Page {initial.page} / {totalPages}
                 </span>
                 <Button
                   variant="outline"
                   size="xs"
-                  disabled={page >= totalPages}
-                  onClick={() => setPage((value) => value + 1)}
+                  disabled={query.page >= totalPages}
+                  onClick={() => updateQuery({ page: String(query.page + 1) })}
                 >
                   Next
                 </Button>
@@ -510,7 +562,11 @@ export function ProductsTab(): React.ReactElement {
 
         {openId ? (
           <div className="border border-border p-3">
-            <ProductPanel productId={openId} onClose={() => setOpenId(null)} />
+            <ProductPanel
+              product={detail}
+              onClose={() => updateQuery({ open: undefined })}
+              actions={actions}
+            />
           </div>
         ) : null}
       </div>

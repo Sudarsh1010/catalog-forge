@@ -981,6 +981,16 @@ describe("product.edit (merchant Origin)", () => {
       text: "Robuste Gießkanne.",
       outOfDate: false,
     })
+    // The requeue itself belongs to the Worker (ADR-0004): the app wrote
+    // the translate-stage reruns FACT for this Product.
+    const reruns = (await db.db.execute(sql`
+      SELECT stage, product_ids FROM reruns WHERE import_id = (
+        SELECT import_id FROM products WHERE id = ${priced}
+      )
+    `)) as unknown as Array<{ stage: string; product_ids: string[] }>
+    expect(reruns).toHaveLength(1)
+    expect(reruns[0]!.stage).toBe("translate")
+    expect(reruns[0]!.product_ids).toEqual([priced])
     // Structured edits flag nothing.
     await seedTranslation(priced, "de", "category", "Garten")
     const structured = await client.product.edit({
@@ -1215,5 +1225,151 @@ describe("product.sendBack (Re-run FACT + retraction)", () => {
     if (isDefinedError(error)) {
       expect(error.code).toBe("PRODUCT_NOT_FOUND")
     }
+  })
+})
+
+describe("product.bulkSendBack (set-based Re-run FACT + retraction)", () => {
+  it("sends many back in one call: ONE reruns fact with all ids, Publications retracted, products flagged", async () => {
+    const { high, medium, pending } = await seedCatalog()
+    // Approved products must stop shipping when sent back (ADR-0005).
+    await client.product.approve({ id: high })
+    await client.product.approve({ id: medium })
+
+    const result = await client.product.bulkSendBack({
+      ids: [high, medium, pending],
+    })
+    expect(result.sentBack).toBe(3)
+    expect(result.productIds.sort()).toEqual([high, medium, pending].sort())
+    expect(result.skipped).toEqual([])
+
+    // One fact carrying ALL chosen ids — never one fact per product
+    // (ADR-0004). All seeded products share one Import.
+    const reruns = (await db.db.execute(sql`
+      SELECT stage, product_ids FROM reruns WHERE import_id = (
+        SELECT import_id FROM products WHERE id = ${high}
+      )
+    `)) as unknown as Array<{ stage: string; product_ids: string[] }>
+    expect(reruns).toHaveLength(1)
+    expect(reruns[0]!.stage).toBe("enrich")
+    expect(reruns[0]!.product_ids.sort()).toEqual(
+      [high, medium, pending].sort()
+    )
+
+    const pubs = (await db.db.execute(sql`
+      SELECT count(*)::int AS count FROM publications
+    `)) as unknown as Array<{ count: number }>
+    expect(pubs[0]!.count).toBe(0)
+
+    const flagged = (await db.db.execute(sql`
+      SELECT id FROM products WHERE needs_review = true
+        AND id IN (${sql.join(
+          [high, medium, pending].map((id) => sql`${id}::uuid`),
+          sql`, `
+        )})
+    `)) as unknown as Array<{ id: string }>
+    expect(flagged.map((row) => row.id).sort()).toEqual(
+      [high, medium, pending].sort()
+    )
+  })
+
+  it("is idempotent for already-sent-back products", async () => {
+    const { high, medium } = await seedCatalog()
+    await client.product.bulkSendBack({ ids: [high, medium] })
+    const again = await client.product.bulkSendBack({
+      ids: [high, medium],
+    })
+    expect(again.sentBack).toBe(2)
+
+    const pubs = (await db.db.execute(sql`
+      SELECT count(*)::int AS count FROM publications
+    `)) as unknown as Array<{ count: number }>
+    expect(pubs[0]!.count).toBe(0)
+    const flagged = (await db.db.execute(sql`
+      SELECT id FROM products WHERE needs_review = true
+        AND id IN (${sql.join(
+          [high, medium].map((id) => sql`${id}::uuid`),
+          sql`, `
+        )})
+    `)) as unknown as Array<{ id: string }>
+    expect(flagged.map((row) => row.id).sort()).toEqual([high, medium].sort())
+  })
+
+  it("rejects selections containing unknown products", async () => {
+    const { high } = await seedCatalog()
+    const [error] = await safe(
+      client.product.bulkSendBack({
+        ids: [high, crypto.randomUUID()],
+      })
+    )
+    expect(isDefinedError(error)).toBe(true)
+    if (isDefinedError(error)) {
+      expect(error.code).toBe("UNKNOWN_PRODUCTS")
+      expect(error.status).toBe(422)
+    }
+  })
+})
+
+describe("products page (server-rendered HTML)", () => {
+  it("renders the catalog table rows in the SSR HTML", async () => {
+    await seedCatalog()
+    const response = await fetch(`${app.baseUrl}/products`)
+    expect(response.status).toBe(200)
+    const html = await response.text()
+    // Real rows in the server output — not an isPending-only shell.
+    expect(html).toContain("Brunner Gießkanne 5L")
+    expect(html).toContain("Schaufel mittel")
+    expect(html).not.toContain('aria-busy="true"')
+    expect(html).not.toContain("No products match")
+  })
+
+  it("sorts and filters through the query string", async () => {
+    await seedCatalog()
+    const get = (path: string) =>
+      fetch(`${app.baseUrl}${path}`).then((response) => response.text())
+
+    const asc = await get("/products?sort=title&dir=asc")
+    expect(asc.indexOf("Blumentopf arm")).toBeLessThan(
+      asc.indexOf("Schaufel mittel")
+    )
+    const desc = await get("/products?sort=title&dir=desc")
+    expect(desc.indexOf("Schaufel mittel")).toBeLessThan(
+      desc.indexOf("Blumentopf arm")
+    )
+
+    const search = await get(`/products?q=${encodeURIComponent("Gießkanne")}`)
+    expect(search).toContain("Gießkanne priced")
+    expect(search).not.toContain("Filler product 0")
+
+    const ready = await get("/products?status=ready")
+    expect(ready).toContain("Schaufel mittel")
+    expect(ready).not.toContain("Raw sku:pending-1")
+  })
+
+  it("renders the side-by-side review panel for the open id", async () => {
+    const { high } = await seedCatalog()
+    const html = await (
+      await fetch(`${app.baseUrl}/products?open=${high}`)
+    ).text()
+    expect(html).toContain("Source — sheet rows, variants, photos")
+    expect(html).toContain("frost-resistant")
+    expect(html).toContain("Close review panel")
+  })
+})
+
+describe("dashboard page (server-rendered HTML)", () => {
+  it("renders the import queue without client queries", async () => {
+    await seedImport()
+    const response = await fetch(`${app.baseUrl}/`)
+    expect(response.status).toBe(200)
+    const html = await response.text()
+    expect(html).toContain("Catalog imports")
+    expect(html).toContain("supplier-sheet.csv")
+    expect(html).not.toContain('aria-busy="true"')
+    expect(html).not.toContain("No imports yet")
+  })
+
+  it("renders the empty queue when nothing has been imported", async () => {
+    const html = await (await fetch(`${app.baseUrl}/`)).text()
+    expect(html).toContain("No imports yet — upload a sheet to get started.")
   })
 })
